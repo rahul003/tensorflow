@@ -92,7 +92,6 @@ void LogMessage::GenerateLogMessage() {
 }
 #endif
 
-namespace {
 // Parse log level (int64) from environment variable (char*)
 int64 LogLevelStrToInt(const char* tf_env_var_val) {
   if (tf_env_var_val == nullptr) {
@@ -111,7 +110,6 @@ int64 LogLevelStrToInt(const char* tf_env_var_val) {
   }
 
   return level;
-}
 }
 
 int64 MinLogLevelFromEnv() {

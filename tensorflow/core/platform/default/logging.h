@@ -27,10 +27,6 @@ limitations under the License.
 // TODO(mrry): Prevent this Windows.h #define from leaking out of our headers.
 #undef ERROR
 
-namespace {
-  int64 LogLevelStrToInt(const char* tf_env_var_val);
-}
-
 namespace tensorflow {
 const int INFO = 0;            // base_logging::INFO;
 const int WARNING = 1;         // base_logging::WARNING;
@@ -314,6 +310,8 @@ T&& CheckNotNull(const char* file, int line, const char* exprtext, T&& t) {
 int64 MinLogLevelFromEnv();
 
 int64 MinVLogLevelFromEnv();
+
+int64 LogLevelStrToInt(const char* tf_env_var_val);
 
 }  // namespace internal
 }  // namespace tensorflow
