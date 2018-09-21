@@ -498,9 +498,11 @@ Status S3FileSystem::Stat(const string& fname, FileStatistics* stats) {
   auto listObjectsOutcome =
       this->GetS3Client()->ListObjects(listObjectsRequest);
   if (listObjectsOutcome.IsSuccess()) {
-    if (listObjectsOutcome.GetResult().GetContents().size() > 0) {
+    auto listObjects = listObjectsOutcome.GetResult().GetContents();
+    if (listObjects.size() > 0) {
       stats->length = 0;
       stats->is_directory = 1;
+      stats->mtime_nsec = listObjects[0].GetLastModified().Millis() * 1e6;
       found = true;
     }
   }
