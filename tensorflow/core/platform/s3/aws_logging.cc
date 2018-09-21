@@ -63,7 +63,7 @@ void AWSLogSystem::LogMessage(Aws::Utils::Logging::LogLevel log_level,
       LOG(FATAL) << message;
       break;
     default:
-      LOG(ERROR) << message;
+      LOG(INFO) << message;
       break;
   }
 }
@@ -76,7 +76,12 @@ Aws::Utils::Logging::LogLevel ParseLogLevelFromEnv() {
 
   // const int64_t level = tensorflow::internal::MinLogLevelFromEnv();
   const char* aws_sdk_log = std::getenv("AWS_S3_LOG");
-  const int64_t level = tensorflow::internal::LogLevelStrToInt(aws_sdk_log);
+  const int64_t level;
+  if (aws_sdk_log == nullptr) {
+    level = 4;
+  } else {
+    level = tensorflow::internal::LogLevelStrToInt(aws_sdk_log);
+  }
 
   switch (level) {
     case 0:
