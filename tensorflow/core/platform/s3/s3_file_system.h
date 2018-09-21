@@ -75,9 +75,17 @@ class S3FileSystem : public FileSystem {
   // for a bucket.
   std::shared_ptr<Aws::S3::S3Client> GetS3Client();
 
+  std::shared_ptr<Aws::Transfer::TransferManager> GetS3TransferManager();
+
   std::shared_ptr<Aws::S3::S3Client> s3_client_;
+
+  std::shared_ptr<Aws::Transfer::TransferManager> transfer_manager_;
+
   // Lock held when checking for s3_client_ initialization.
   mutex client_lock_;
+
+  // Lock held when checking for s3_client_ initialization.
+  mutex manager_lock_;
 };
 
 }  // namespace tensorflow
