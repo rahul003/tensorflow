@@ -514,7 +514,33 @@ Status S3FileSystem::Stat(const string& fname, FileStatistics* stats) {
 
 Status S3FileSystem::GetMatchingPaths(const string& pattern,
                                       std::vector<string>* results) {
-  return internal::GetMatchingPaths(this, Env::Default(), pattern, results);
+  results->clear();
+
+  string bucket, object;
+  string fixed_prefix = pattern.substr(0, pattern.find_first_of("*?[\\"));
+  TF_RETURN_IF_ERROR(ParseS3Path(fixed_prefix, false, &bucket, &object));
+
+  Aws::S3::Model::ListObjectsRequest listObjectsRequest;  
+  listObjectsRequest.WithBucket(bucket.c_str())
+      .WithPrefix(object.c_str());
+  listObjectsRequest.SetResponseStreamFactory(
+      []() { return Aws::New<Aws::StringStream>(kS3FileSystemAllocationTag); });
+  auto listObjectsOutcome =
+      this->GetS3Client()->ListObjects(listObjectsRequest);
+  if (listObjectsOutcome.IsSuccess()) {
+    auto contents = listObjectsOutcome.GetResult().GetContents();
+      // Match all obtained files to the input pattern.
+    for (const auto& f : contents) {
+      if (env->MatchPath(f.GetKey(), pattern)) {
+        results->push_back(f);
+      }
+    }
+  } else {
+    return errors::Unknown("ListObjects failed with the error",
+                            listObjectsOutcome.GetError().GetExceptionName(), ": ",
+                            listObjectsOutcome.GetError().GetMessage());
+  }
+  return Status::OK();
 }
 
 Status S3FileSystem::DeleteFile(const string& fname) {
