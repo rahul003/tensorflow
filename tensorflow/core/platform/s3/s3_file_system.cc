@@ -26,16 +26,16 @@ limitations under the License.
 #include <aws/core/utils/StringUtils.h>
 #include <aws/core/utils/logging/AWSLogging.h>
 #include <aws/core/utils/logging/LogSystemInterface.h>
+#include <aws/core/utils/threading/Executor.h>
 #include <aws/s3/S3Client.h>
 #include <aws/s3/S3Errors.h>
 #include <aws/s3/model/CopyObjectRequest.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
-// #include <aws/s3/model/GetObjectRequest.h>
+#include <aws/s3/model/GetObjectRequest.h>
 #include <aws/s3/model/HeadBucketRequest.h>
 #include <aws/s3/model/HeadObjectRequest.h>
 #include <aws/s3/model/ListObjectsRequest.h>
 // #include <aws/s3/model/PutObjectRequest.h>
-#include <aws/transfer/TransferManager.h>
 
 #include <cstdlib>
 
@@ -142,7 +142,13 @@ void ShutdownClient(Aws::S3::S3Client* s3_client) {
 
 void ShutdownTransferManager(Aws::Transfer::TransferManager* transfer_manager) {
   if (transfer_manager != nullptr) {
-    delete s3_client;
+    delete transfer_manager;
+  }
+}
+
+void ShutdownExecutor(Aws::Utils::Threading::PooledThreadExecutor* executor) {
+  if (executor != nullptr) {
+    delete executor;
   }
 }
 
@@ -250,20 +256,22 @@ class S3WritableFile : public WritableFile {
     if (!sync_needed_) {
       return Status::OK();
     }
-    std::shared_ptr<Aws::Transfer::TransferHandle> handle = transfer_manager_.UploadFile(outfile_, 
+    std::shared_ptr<Aws::Transfer::TransferHandle> handle = transfer_manager_.get()->UploadFile(outfile_, 
       bucket_.c_str(), 
       object_.c_str(), 
       "application" ,
       Aws::Map<Aws::String, Aws::String>());
 
     handle->WaitUntilFinished();
+    int retries = 0;
     while (handle->GetStatus() == Aws::Transfer::TransferStatus::FAILED && retries++ < 5) {
       // if multipart upload was used, only the failed parts will be re-sent
-      transfer_manager_.RetryUpload(outfile_, handle);
+      transfer_manager_.get()->RetryUpload(outfile_, handle);
     }
     if (handle->GetStatus() != Aws::Transfer::TransferStatus::COMPLETED) {
-      return errors::Unknown(handle->GetLastError(),
-                             ": ", handle->GetFailedParts().size(), " failed parts");
+      return errors::Unknown(handle->GetLastError().GetExceptionName(),
+                             ": ", handle->GetFailedParts().size(), " failed parts. ", 
+                             handle->GetLastError().GetMessage());
     }
     return Status::OK();
   }
@@ -271,7 +279,7 @@ class S3WritableFile : public WritableFile {
  private:
   string bucket_;
   string object_;
-  std::shared_ptr<Aws::Transfer::TransferManagern> transfer_manager_;
+  std::shared_ptr<Aws::Transfer::TransferManager> transfer_manager_;
   bool sync_needed_;
   std::shared_ptr<Aws::Utils::TempFile> outfile_;
 };
@@ -293,7 +301,8 @@ class S3ReadOnlyMemoryRegion : public ReadOnlyMemoryRegion {
 S3FileSystem::S3FileSystem()
     : s3_client_(nullptr, ShutdownClient), 
       client_lock_(),
-      transfer_manager_(nullptr, ShutdownTransferManager) {}
+      transfer_manager_(nullptr, ShutdownTransferManager),
+      executor_(nullptr, ShutdownExecutor) {}
 
 S3FileSystem::~S3FileSystem() {}
 
@@ -330,11 +339,18 @@ std::shared_ptr<Aws::S3::S3Client> S3FileSystem::GetS3Client() {
 std::shared_ptr<Aws::Transfer::TransferManager> S3FileSystem::GetTransferManager() {
   std::lock_guard<mutex> lock(this->manager_lock_);
   if (this->transfer_manager_.get() == nullptr) {
-    Aws::Transfer::TransferManagerConfiguration config;
+    Aws::Transfer::TransferManagerConfiguration config = Aws::Transfer::TransferManagerConfiguration(this->GetExecutor().get());
     config.s3Client = this->GetS3Client();
     this->transfer_manager_ = Aws::Transfer::TransferManager::Create(config);
   }
   return this->transfer_manager_;
+}
+
+std::shared_ptr<Aws::Utils::Threading::PooledThreadExecutor> S3FileSystem::GetExecutor() {
+  if (this->executor_.get() == nullptr) {
+    this->executor_ = std::shared_ptr<Aws::Utils::Threading::PooledThreadExecutor>(new Aws::Utils::Threading::PooledThreadExecutor(5));
+  }
+  return this->executor_;
 }
 
 Status S3FileSystem::NewRandomAccessFile(
@@ -531,8 +547,8 @@ Status S3FileSystem::GetMatchingPaths(const string& pattern,
     auto contents = listObjectsOutcome.GetResult().GetContents();
       // Match all obtained files to the input pattern.
     for (const auto& f : contents) {
-      if (env->MatchPath(f.GetKey(), pattern)) {
-        results->push_back(f);
+      if (Env::Default()->MatchPath(string(f.GetKey().c_str()), pattern)) {
+        results->push_back(string(f.GetKey().c_str()));
       }
     }
   } else {
