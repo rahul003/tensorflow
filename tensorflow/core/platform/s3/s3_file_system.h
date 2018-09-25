@@ -17,6 +17,7 @@ limitations under the License.
 #define TENSORFLOW_CONTRIB_S3_S3_FILE_SYSTEM_H_
 
 #include <aws/transfer/TransferManager.h>
+#include "tensorflow/core/platform/s3/aws_logging.h"
 #include <aws/s3/S3Client.h>
 #include "tensorflow/core/platform/env.h"
 #include "tensorflow/core/platform/mutex.h"
@@ -90,6 +91,8 @@ class S3FileSystem : public FileSystem {
 
   // Lock held when checking for s3_client_ initialization.
   mutex manager_lock_;
+
+  AWSLogSystem* log_system_;
 };
 
 }  // namespace tensorflow

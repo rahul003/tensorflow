@@ -19,6 +19,7 @@ limitations under the License.
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/s3/aws_crypto.h"
 #include "tensorflow/core/platform/s3/aws_logging.h"
+#include "tensorflow/core/platform/logging.h"
 
 #include <aws/core/Aws.h>
 #include <aws/core/config/AWSProfileConfigLoader.h>
@@ -127,7 +128,6 @@ Aws::Client::ClientConfiguration& GetDefaultClientConfig() {
 
     init = true;
   }
-
   return cfg;
 };
 
@@ -302,7 +302,9 @@ S3FileSystem::S3FileSystem()
     : s3_client_(nullptr, ShutdownClient), 
       client_lock_(),
       transfer_manager_(nullptr, ShutdownTransferManager),
-      executor_(nullptr, ShutdownExecutor) {}
+      executor_(nullptr, ShutdownExecutor) {
+        log_system_ = new AWSLogSystem(Aws::Utils::Logging::LogLevel::Info);
+      }
 
 S3FileSystem::~S3FileSystem() {}
 
@@ -424,6 +426,7 @@ Status S3FileSystem::FileExists(const string& fname) {
 
 Status S3FileSystem::GetChildren(const string& dir,
                                  std::vector<string>* result) {
+  log_system_->LogMessage(Aws::Utils::Logging::LogLevel::Info, "Get children for " + dir);
   string bucket, prefix;
   TF_RETURN_IF_ERROR(ParseS3Path(dir, false, &bucket, &prefix));
 
@@ -471,6 +474,8 @@ Status S3FileSystem::GetChildren(const string& dir,
 }
 
 Status S3FileSystem::Stat(const string& fname, FileStatistics* stats) {
+  log_system_->LogMessage(Aws::Utils::Logging::LogLevel::Info, "Stat for file " + fname);
+
   string bucket, object;
   TF_RETURN_IF_ERROR(ParseS3Path(fname, true, &bucket, &object));
 
@@ -530,8 +535,8 @@ Status S3FileSystem::Stat(const string& fname, FileStatistics* stats) {
 
 Status S3FileSystem::GetMatchingPaths(const string& pattern,
                                       std::vector<string>* results) {
+  log_system_->LogMessage(Aws::Utils::Logging::LogLevel::Info, "Get matching paths " + pattern);
   results->clear();
-
   string bucket, object;
   string fixed_prefix = pattern.substr(0, pattern.find_first_of("*?[\\"));
   TF_RETURN_IF_ERROR(ParseS3Path(fixed_prefix, false, &bucket, &object));
