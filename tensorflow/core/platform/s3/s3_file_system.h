@@ -21,6 +21,7 @@ limitations under the License.
 #include <aws/s3/S3Client.h>
 #include "tensorflow/core/platform/env.h"
 #include "tensorflow/core/platform/mutex.h"
+#include "tensorflow/core/platform/retrying_file_system.h"
 
 namespace tensorflow {
 
@@ -91,6 +92,7 @@ class S3FileSystem : public FileSystem {
 
   // Lock held when checking for s3_client_ initialization.
   mutex manager_lock_;
+
 };
 
 /// S3 implementation of a file system with retry on failures.

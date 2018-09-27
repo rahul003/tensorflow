@@ -3194,10 +3194,10 @@ cc_library(
 cc_library(
     name = "retrying_utils",
     srcs = [
-        "retrying_utils.cc",
+        "platform/retrying_utils.cc",
     ],
     hdrs = [
-        "retrying_utils.h",
+        "platform/retrying_utils.h",
     ],
     copts = tf_copts(),
     deps = [
@@ -3209,7 +3209,7 @@ cc_library(
 cc_library(
     name = "retrying_file_system",
     hdrs = [
-        "retrying_file_system.h",
+        "platform/retrying_file_system.h",
     ],
     copts = tf_copts(),
     deps = [

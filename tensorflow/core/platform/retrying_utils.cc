@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "tensorflow/core/platform/cloud/retrying_utils.h"
+#include "tensorflow/core/platform/retrying_utils.h"
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/lib/random/random.h"
 #include "tensorflow/core/platform/env.h"
@@ -28,34 +28,35 @@ constexpr int kMaxRetries = 10;
 // Maximum backoff time in microseconds.
 constexpr int64 kMaximumBackoffMicroseconds = 32000000;  // 32 seconds.
 
-bool IsRetriable(error::Code code) {
-  switch (code) {
-    case error::UNAVAILABLE:
-    case error::DEADLINE_EXCEEDED:
-    case error::UNKNOWN:
-      return true;
-    default:
-      // OK also falls here.
-      return false;
-  }
+const std::set<error::Code> default_retriable_errors = {error::UNAVAILABLE, error::DEADLINE_EXCEEDED, error::UNKNOWN};
+
+bool IsRetriable(const std::set<error::Code> retriable_errors, error::Code code) {
+  return retriable_errors.find(code) != retriable_errors.end();
 }
 
 }  // namespace
 
 Status RetryingUtils::CallWithRetries(const std::function<Status()>& f,
-                                      const int64 initial_delay_microseconds) {
+                                      const int64 initial_delay_microseconds,
+                                      const std::set<error::Code> retriable_errors) {
   return CallWithRetries(f, initial_delay_microseconds, [](int64 micros) {
     return Env::Default()->SleepForMicroseconds(micros);
-  });
+  }, retriable_errors);
+}
+
+Status RetryingUtils::CallWithRetries(const std::function<Status()>& f,
+                                      const int64 initial_delay_microseconds) {
+  return CallWithRetries(f, initial_delay_microseconds, default_retriable_errors);
 }
 
 Status RetryingUtils::CallWithRetries(
     const std::function<Status()>& f, const int64 initial_delay_microseconds,
-    const std::function<void(int64)>& sleep_usec) {
+    const std::function<void(int64)>& sleep_usec,
+    const std::set<error::Code> retriable_errors) {
   int retries = 0;
   while (true) {
     auto status = f();
-    if (!IsRetriable(status.code())) {
+    if (!IsRetriable(retriable_errors, status.code())) {
       return status;
     }
     if (retries >= kMaxRetries) {
@@ -83,9 +84,16 @@ Status RetryingUtils::CallWithRetries(
   }
 }
 
+Status RetryingUtils::CallWithRetries(
+    const std::function<Status()>& f, const int64 initial_delay_microseconds,
+    const std::function<void(int64)>& sleep_usec) {
+  return CallWithRetries(f, initial_delay_microseconds, sleep_usec, default_retriable_errors);
+}
+
 Status RetryingUtils::DeleteWithRetries(
     const std::function<Status()>& delete_func,
-    const int64 initial_delay_microseconds) {
+    const int64 initial_delay_microseconds, 
+    const std::set<error::Code> retriable_errors) {
   bool is_retried = false;
   return RetryingUtils::CallWithRetries(
       [delete_func, &is_retried]() {
@@ -96,7 +104,13 @@ Status RetryingUtils::DeleteWithRetries(
         is_retried = true;
         return status;
       },
-      initial_delay_microseconds);
+      initial_delay_microseconds, retriable_errors);
+}
+
+Status RetryingUtils::DeleteWithRetries(
+    const std::function<Status()>& delete_func,
+    const int64 initial_delay_microseconds) {
+  return DeleteWithRetries(delete_func, initial_delay_microseconds, default_retriable_errors);
 }
 
 }  // namespace tensorflow
