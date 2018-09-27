@@ -91,8 +91,6 @@ class S3FileSystem : public FileSystem {
 
   // Lock held when checking for s3_client_ initialization.
   mutex manager_lock_;
-
-  AWSLogSystem* log_system_;
 };
 
 /// S3 implementation of a file system with retry on failures.

@@ -301,9 +301,7 @@ S3FileSystem::S3FileSystem()
     : s3_client_(nullptr, ShutdownClient), 
       client_lock_(),
       transfer_manager_(nullptr, ShutdownTransferManager),
-      executor_(nullptr, ShutdownExecutor) {
-        log_system_ = new AWSLogSystem(Aws::Utils::Logging::LogLevel::Info);
-      }
+      executor_(nullptr, ShutdownExecutor) {}
 
 S3FileSystem::~S3FileSystem() {}
 
@@ -425,7 +423,7 @@ Status S3FileSystem::FileExists(const string& fname) {
 
 Status S3FileSystem::GetChildren(const string& dir,
                                  std::vector<string>* result) {
-  log_system_->LogMessage(Aws::Utils::Logging::LogLevel::Info, "Get children for " + dir);
+  LOG(WARNING) << "Get children for " << dir;
   string bucket, prefix;
   TF_RETURN_IF_ERROR(ParseS3Path(dir, false, &bucket, &prefix));
 
@@ -473,7 +471,7 @@ Status S3FileSystem::GetChildren(const string& dir,
 }
 
 Status S3FileSystem::Stat(const string& fname, FileStatistics* stats) {
-  log_system_->LogMessage(Aws::Utils::Logging::LogLevel::Info, "Stat for file " + fname);
+  LOG(WARNING) << "Stat for file " << fname;
 
   string bucket, object;
   TF_RETURN_IF_ERROR(ParseS3Path(fname, true, &bucket, &object));
