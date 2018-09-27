@@ -95,6 +95,13 @@ class S3FileSystem : public FileSystem {
   AWSLogSystem* log_system_;
 };
 
+/// S3 implementation of a file system with retry on failures.
+class RetryingS3FileSystem : public RetryingFileSystem<S3FileSystem> {
+ public:
+  RetryingS3FileSystem()
+      : RetryingFileSystem(std::unique_ptr<S3FileSystem>(new S3FileSystem)) {}
+};
+
 }  // namespace tensorflow
 
 #endif  // TENSORFLOW_CONTRIB_S3_S3_FILE_SYSTEM_H_

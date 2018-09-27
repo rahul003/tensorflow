@@ -686,6 +686,6 @@ Status S3FileSystem::RenameFile(const string& src, const string& target) {
   return Status::OK();
 }
 
-REGISTER_FILE_SYSTEM("s3", S3FileSystem);
+REGISTER_FILE_SYSTEM("s3", RetryingS3FileSystem);
 
 }  // namespace tensorflow
