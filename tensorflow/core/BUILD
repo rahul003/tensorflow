@@ -4737,7 +4737,7 @@ tf_cc_tests(
 tf_cc_test(
     name = "retrying_file_system_test",
     size = "small",
-    srcs = ["retrying_file_system_test.cc"],
+    srcs = ["platform/retrying_file_system_test.cc"],
     deps = [
         ":retrying_file_system",
         "//tensorflow/core:lib",
@@ -4750,7 +4750,7 @@ tf_cc_test(
 tf_cc_test(
     name = "retrying_utils_test",
     size = "small",
-    srcs = ["retrying_utils_test.cc"],
+    srcs = ["platform/retrying_utils_test.cc"],
     deps = [
         ":retrying_utils",
         "//tensorflow/core:lib",

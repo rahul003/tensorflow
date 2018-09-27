@@ -22,7 +22,6 @@ limitations under the License.
 #include "tensorflow/core/platform/env.h"
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/retrying_file_system.h"
-
 namespace tensorflow {
 
 class S3FileSystem : public FileSystem {
@@ -99,7 +98,13 @@ class S3FileSystem : public FileSystem {
 class RetryingS3FileSystem : public RetryingFileSystem<S3FileSystem> {
  public:
   RetryingS3FileSystem()
-      : RetryingFileSystem(std::unique_ptr<S3FileSystem>(new S3FileSystem)) {}
+      : RetryingFileSystem(std::unique_ptr<S3FileSystem>(new S3FileSystem),
+        { error::UNAVAILABLE, 
+          error::DEADLINE_EXCEEDED, 
+          error::UNKNOWN, 
+          error::FAILED_PRECONDITION,
+          error::INTERNAL},
+        1000000) {}
 };
 
 }  // namespace tensorflow
