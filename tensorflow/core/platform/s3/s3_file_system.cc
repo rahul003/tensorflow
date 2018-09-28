@@ -446,7 +446,7 @@ Status S3FileSystem::FileExists(const string& fname) {
 
 Status S3FileSystem::GetChildren(const string& dir,
                                  std::vector<string>* result) {
-  VLOG(1) << "Get children for " << dir;
+  VLOG(1) << "GetChildren for " << dir;
   string bucket, prefix;
   TF_RETURN_IF_ERROR(ParseS3Path(dir, false, &bucket, &prefix));
 
@@ -494,8 +494,7 @@ Status S3FileSystem::GetChildren(const string& dir,
 }
 
 Status S3FileSystem::Stat(const string& fname, FileStatistics* stats) {
-  VLOG(1) << "Stat for file " << fname;
-
+  VLOG(1) << "Stat for " << fname;
   string bucket, object;
   TF_RETURN_IF_ERROR(ParseS3Path(fname, true, &bucket, &object));
 
@@ -555,13 +554,13 @@ Status S3FileSystem::Stat(const string& fname, FileStatistics* stats) {
 
 Status S3FileSystem::GetMatchingPaths(const string& pattern,
                                       std::vector<string>* results) {
-  VLOG(1) << "GetMatchingPaths " << pattern;
+  VLOG(1) << "GetMatchingPaths: " << pattern;
   return internal::GetMatchingPaths(this, Env::Default(), pattern, results);
 }
 
 Status S3FileSystem::DeleteFile(const string& fname) {
   string bucket, object;
-  VLOG(1) << "DeleteFile " << fname;
+  VLOG(1) << "DeleteFile: " << fname;
   TF_RETURN_IF_ERROR(ParseS3Path(fname, false, &bucket, &object));
 
   Aws::S3::Model::DeleteObjectRequest deleteObjectRequest;
@@ -578,7 +577,7 @@ Status S3FileSystem::DeleteFile(const string& fname) {
 
 Status S3FileSystem::CreateDir(const string& dirname) {
   string bucket, object;
-  VLOG(1) << "CreateDir " << dirname;
+  VLOG(1) << "CreateDir: " << dirname;
   TF_RETURN_IF_ERROR(ParseS3Path(dirname, true, &bucket, &object));
   //TODO(rahul) DONT CREATE IF EXISTS
   if (object.empty()) {
@@ -594,14 +593,17 @@ Status S3FileSystem::CreateDir(const string& dirname) {
   if (filename.back() != '/') {
     filename.push_back('/');
   }
-  std::unique_ptr<WritableFile> file;
-  TF_RETURN_IF_ERROR(NewWritableFile(filename, &file));
-  TF_RETURN_IF_ERROR(file->Close());
+
+  if (!this->FileExists(filename)) {
+    std::unique_ptr<WritableFile> file;
+    TF_RETURN_IF_ERROR(NewWritableFile(filename, &file));
+    TF_RETURN_IF_ERROR(file->Close());  
+  }
   return Status::OK();
 }
 
 Status S3FileSystem::DeleteDir(const string& dirname) {
-  VLOG(1) << "DeleteDir " << dirname;
+  VLOG(1) << "DeleteDir: " << dirname;
   string bucket, object;
   TF_RETURN_IF_ERROR(ParseS3Path(dirname, false, &bucket, &object));
 
@@ -642,7 +644,7 @@ Status S3FileSystem::GetFileSize(const string& fname, uint64* file_size) {
 }
 
 Status S3FileSystem::RenameFile(const string& src, const string& target) {
-  VLOG(0) << "RenameFile " << src << " to " << target;
+  VLOG(1) << "RenameFile from: " << src << " to: " << target;
   string src_bucket, src_object, target_bucket, target_object;
   TF_RETURN_IF_ERROR(ParseS3Path(src, false, &src_bucket, &src_object));
   TF_RETURN_IF_ERROR(
