@@ -430,13 +430,16 @@ def atomic_write_string_to_file(filename, contents, overwrite=True):
     overwrite: boolean, if false it's an error for `filename` to be occupied by
         an existing file.
   """
-  temp_pathname = filename + ".tmp" + uuid.uuid4().hex
-  write_string_to_file(temp_pathname, contents)
-  try:
-    rename(temp_pathname, filename, overwrite)
-  except errors.OpError:
-    delete_file(temp_pathname)
-    raise
+  if filename.startswith('s3://'):
+    write_string_to_file(filename, contents)
+  else:
+    temp_pathname = filename + ".tmp" + uuid.uuid4().hex
+    write_string_to_file(temp_pathname, contents)
+    try:
+      rename(temp_pathname, filename, overwrite)
+    except errors.OpError:
+      delete_file(temp_pathname)
+      raise
 
 
 @tf_export("gfile.DeleteRecursively")

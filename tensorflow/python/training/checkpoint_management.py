@@ -236,7 +236,6 @@ def update_checkpoint_state_internal(save_dir,
   file_io.atomic_write_string_to_file(coord_checkpoint_filename,
                                       text_format.MessageToString(ckpt))
 
-
 @tf_export("train.get_checkpoint_state")
 def get_checkpoint_state(checkpoint_dir, latest_filename=None):
   """Returns CheckpointState proto from the "checkpoint" file.
