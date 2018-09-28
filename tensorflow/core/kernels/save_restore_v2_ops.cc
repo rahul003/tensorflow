@@ -104,10 +104,9 @@ class SaveV2 : public OpKernel {
     const string& prefix_string = prefix.scalar<string>()();
     const auto& tensor_names_flat = tensor_names.flat<string>();
     const auto& shape_and_slices_flat = shape_and_slices.flat<string>();
-
     BundleWriter writer(Env::Default(), prefix_string);
     OP_REQUIRES_OK(context, writer.status());
-    VLOG(1) << "BundleWriter, prefix_string: " << prefix_string;
+    VLOG(0) << "BundleWriter, prefix_string: " << prefix_string;
 
     for (int i = 0; i < num_tensors; ++i) {
       const string& tensor_name = tensor_names_flat(i);
@@ -216,6 +215,7 @@ class MergeV2Checkpoints : public OpKernel {
         gtl::ArraySlice<string>(checkpoint_prefixes.flat<string>());
     Env* env = Env::Default();
     const string& merged_prefix = destination_prefix.scalar<string>()();
+    LOG(WARNING) << "Merging CHeckpoints "<<merged_prefix; 
     OP_REQUIRES_OK(
         context, tensorflow::MergeBundles(env, input_prefixes, merged_prefix));
 

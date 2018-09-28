@@ -36,6 +36,7 @@ limitations under the License.
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/lib/gtl/map_util.h"
 #include "tensorflow/core/lib/gtl/stl_util.h"
+#include "tensorflow/core/lib/strings/str_util.h"
 #include "tensorflow/core/lib/hash/crc32c.h"
 #include "tensorflow/core/lib/io/path.h"
 #include "tensorflow/core/lib/io/table_builder.h"
@@ -388,25 +389,34 @@ Status PadAlignment(FileOutputBuffer* out, int alignment, int64* size) {
 BundleWriter::BundleWriter(Env* env, StringPiece prefix, const Options& options)
     : env_(env),
       options_(options),
-      prefix_(prefix),
-      tmp_metadata_path_(strings::StrCat(MetaFilename(prefix_), ".tempstate",
-                                         random::New64())),
-      tmp_data_path_(strings::StrCat(DataFilename(prefix_, 0, 1), ".tempstate",
-                                     random::New64())),
+      prefix_(prefix),      
       out_(nullptr),
-      size_(0) {
+      size_(0) {  
+  use_temp_file_ = !str_util::StartsWith(prefix_, "s3://");
+  
+  if (use_temp_file_) {
+    data_path_ = strings::StrCat(DataFilename(prefix_, 0, 1), ".tempstate",
+                                 random::New64());
+    metadata_path_ = strings::StrCat(MetaFilename(prefix_), ".tempstate",
+                                         random::New64());
+  } else {
+    data_path_ = DataFilename(prefix_, 0, 1);
+    metadata_path_ = MetaFilename(prefix_);
+  }
+
   status_ = env_->CreateDir(string(io::Dirname(prefix_)));
   if (!status_.ok() && !errors::IsAlreadyExists(status_)) {
     return;
   }
-  const string filename = DataFilename(prefix_, 0, 1);
   std::unique_ptr<WritableFile> wrapper;
-  status_ = env_->NewWritableFile(tmp_data_path_, &wrapper);
+
+  status_ = env_->NewWritableFile(data_path_, &wrapper);
   if (!status_.ok()) return;
   out_ = std::unique_ptr<FileOutputBuffer>(
       new FileOutputBuffer(wrapper.release(), 8 << 20 /* 8MB write buffer */));
 
-  VLOG(1) << "Writing to file " << tmp_data_path_;
+  VLOG(0) << "Writing to file " << data_path_;
+  VLOG(0) << "metadata_path_: " << metadata_path_ << "; prefix:" << prefix_;
 }
 
 Status BundleWriter::Add(StringPiece key, const Tensor& val) {
@@ -494,16 +504,19 @@ Status BundleWriter::Finish() {
     status_.Update(out_->Close());
     out_ = nullptr;
     if (status_.ok()) {
-      status_ = Env::Default()->RenameFile(tmp_data_path_,
-                                           DataFilename(prefix_, 0, 1));
+      if (use_temp_file_) {
+        VLOG(0) << "renaming " << data_path_ << "to :" << DataFilename(prefix_, 0,1);
+        status_ = Env::Default()->RenameFile(data_path_,
+                                           DataFilename(prefix_, 0, 1));  
+      }
     } else {
-      Env::Default()->DeleteFile(tmp_data_path_).IgnoreError();
+      Env::Default()->DeleteFile(data_path_).IgnoreError();
     }
   }
   if (!status_.ok()) return status_;
   // Build key -> BundleEntryProto table.
   std::unique_ptr<WritableFile> file;
-  status_ = env_->NewWritableFile(tmp_metadata_path_, &file);
+  status_ = env_->NewWritableFile(metadata_path_, &file);
   if (!status_.ok()) return status_;
   {
     // N.B.: the default use of Snappy compression may not be supported on all
@@ -530,12 +543,15 @@ Status BundleWriter::Finish() {
   }
   status_.Update(file->Close());
   if (!status_.ok()) {
-    Env::Default()->DeleteFile(tmp_metadata_path_).IgnoreError();
+    Env::Default()->DeleteFile(metadata_path_).IgnoreError();
     return status_;
   } else {
-    status_ =
-        Env::Default()->RenameFile(tmp_metadata_path_, MetaFilename(prefix_));
-    if (!status_.ok()) return status_;
+    if (use_temp_file_) {
+      VLOG(0) << "renaming " << metadata_path_ << "to :" << MetaFilename(prefix_);
+      status_ =
+        Env::Default()->RenameFile(metadata_path_, MetaFilename(prefix_));
+      if (!status_.ok()) return status_;
+    }
   }
   status_ = errors::Internal("BundleWriter is closed");
   return Status::OK();
@@ -565,7 +581,7 @@ struct MergeState {
 // Returns OK iff the merge succeeds.
 static Status MergeOneBundle(Env* env, StringPiece prefix,
                              MergeState* merge_state) {
-  VLOG(1) << "Merging bundle:" << prefix;
+  VLOG(0) << "Merging bundle:" << prefix;
   const string filename = MetaFilename(prefix);
   uint64 file_size;
   TF_RETURN_IF_ERROR(env->GetFileSize(filename, &file_size));
@@ -675,7 +691,7 @@ Status MergeBundles(Env* env, gtl::ArraySlice<string> prefixes,
 
   // Renames data files to contain the merged bundle prefix.
   for (const auto& p : merge.shard_ids) {
-    VLOG(1) << "Renaming " << p.first << " to "
+    VLOG(0) << "Renaming " << p.first << " to "
             << DataFilename(merged_prefix, p.second, merge.shard_ids.size());
     TF_RETURN_IF_ERROR(env->RenameFile(
         p.first,
@@ -702,7 +718,7 @@ Status MergeBundles(Env* env, gtl::ArraySlice<string> prefixes,
   }
   status.Update(merged_metadata->Close());
   if (!status.ok()) return status;
-  VLOG(1) << "Merged bundles to:" << merged_prefix;
+  VLOG(0) << "Merged bundles to:" << merged_prefix;
 
   // Cleanup: best effort based and ignores errors.
   for (const string& prefix : prefixes) {

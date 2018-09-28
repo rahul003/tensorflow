@@ -36,6 +36,7 @@ limitations under the License.
 #include <aws/s3/model/HeadBucketRequest.h>
 #include <aws/s3/model/HeadObjectRequest.h>
 #include <aws/s3/model/ListObjectsRequest.h>
+#include <aws/s3/model/PutObjectRequest.h>
 
 #include <cstdlib>
 
@@ -184,6 +185,7 @@ class S3RandomAccessFile : public RandomAccessFile {
 
   Status Read(uint64 offset, size_t n, StringPiece* result,
               char* scratch) const override {
+    VLOG(0) << "ReadfilefromS3 " << bucket_ << "/" << object_;
     Aws::S3::Model::GetObjectRequest getObjectRequest;
     getObjectRequest.WithBucket(bucket_.c_str()).WithKey(object_.c_str());
     string bytes = strings::StrCat("bytes=", offset, "-", offset + n - 1);
@@ -213,10 +215,12 @@ class S3RandomAccessFile : public RandomAccessFile {
 class S3WritableFile : public WritableFile {
  public:
   S3WritableFile(const string& bucket, const string& object,
-                 std::shared_ptr<Aws::Transfer::TransferManager> transfer_manager)
+                 std::shared_ptr<Aws::Transfer::TransferManager> transfer_manager,
+                 std::shared_ptr<Aws::S3::S3Client> s3_client)
       : bucket_(bucket),
         object_(object),
         transfer_manager_(transfer_manager),
+        s3_client_(s3_client),
         sync_needed_(true),
         outfile_(Aws::MakeShared<Aws::Utils::TempFile>(
             kS3FileSystemAllocationTag, "/tmp/s3_filesystem_XXXXXX",
@@ -255,22 +259,39 @@ class S3WritableFile : public WritableFile {
     if (!sync_needed_) {
       return Status::OK();
     }
-    std::shared_ptr<Aws::Transfer::TransferHandle> handle = transfer_manager_.get()->UploadFile(outfile_, 
-      bucket_.c_str(), 
-      object_.c_str(), 
-      "application" ,
-      Aws::Map<Aws::String, Aws::String>());
+    // LOG(WARNING) << transfer_manager_;
+    // LOG(WARNING) << bucket_ << " " << object_;
+    // std::shared_ptr<Aws::Transfer::TransferHandle> handle = transfer_manager_.get()->UploadFile(outfile_, 
+    //   bucket_.c_str(), 
+    //   object_.c_str(), 
+    //   "application" ,
+    //   Aws::Map<Aws::String, Aws::String>());
 
-    handle->WaitUntilFinished();
-    int retries = 0;
-    while (handle->GetStatus() == Aws::Transfer::TransferStatus::FAILED && retries++ < 5) {
-      // if multipart upload was used, only the failed parts will be re-sent
-      transfer_manager_.get()->RetryUpload(outfile_, handle);
-    }
-    if (handle->GetStatus() != Aws::Transfer::TransferStatus::COMPLETED) {
-      return errors::Unknown(handle->GetLastError().GetExceptionName(),
-                             ": ", handle->GetFailedParts().size(), " failed parts. ", 
-                             handle->GetLastError().GetMessage());
+    // handle->WaitUntilFinished();
+    // int retries = 0;
+    // while (handle->GetStatus() == Aws::Transfer::TransferStatus::FAILED && retries++ < 5) {
+    //   // if multipart upload was used, only the failed parts will be re-sent
+    //   transfer_manager_.get()->RetryUpload(outfile_, handle);
+    // }
+    // if (handle->GetStatus() != Aws::Transfer::TransferStatus::COMPLETED) {
+    //   return errors::Unknown(handle->GetLastError().GetExceptionName(),
+    //                          ": ", handle->GetFailedParts().size(), " failed parts. ", 
+    //                          handle->GetLastError().GetMessage());
+    // }
+    // return Status::OK();
+    VLOG(0) << "WritefiletoS3 " << bucket_ << "/" << object_;
+        Aws::S3::Model::PutObjectRequest putObjectRequest;
+    putObjectRequest.WithBucket(bucket_.c_str()).WithKey(object_.c_str());
+    long offset = outfile_->tellp();
+    outfile_->seekg(0);
+    putObjectRequest.SetBody(outfile_);
+    putObjectRequest.SetContentLength(offset);
+    auto putObjectOutcome = this->s3_client_->PutObject(putObjectRequest);
+    outfile_->clear();
+    outfile_->seekp(offset);
+    if (!putObjectOutcome.IsSuccess()) {
+      return errors::Unknown(putObjectOutcome.GetError().GetExceptionName(),
+                             ": ", putObjectOutcome.GetError().GetMessage());
     }
     return Status::OK();
   }
@@ -281,6 +302,7 @@ class S3WritableFile : public WritableFile {
   std::shared_ptr<Aws::Transfer::TransferManager> transfer_manager_;
   bool sync_needed_;
   std::shared_ptr<Aws::Utils::TempFile> outfile_;
+  std::shared_ptr<Aws::S3::S3Client> s3_client_;
 };
 
 class S3ReadOnlyMemoryRegion : public ReadOnlyMemoryRegion {
@@ -364,7 +386,7 @@ Status S3FileSystem::NewWritableFile(const string& fname,
                                      std::unique_ptr<WritableFile>* result) {
   string bucket, object;
   TF_RETURN_IF_ERROR(ParseS3Path(fname, false, &bucket, &object));
-  result->reset(new S3WritableFile(bucket, object, this->GetTransferManager()));
+  result->reset(new S3WritableFile(bucket, object, this->GetTransferManager(), this->GetS3Client()));
   return Status::OK();
 }
 
@@ -379,7 +401,7 @@ Status S3FileSystem::NewAppendableFile(const string& fname,
 
   string bucket, object;
   TF_RETURN_IF_ERROR(ParseS3Path(fname, false, &bucket, &object));
-  result->reset(new S3WritableFile(bucket, object, this->GetTransferManager()));
+  result->reset(new S3WritableFile(bucket, object, this->GetTransferManager(), this->GetS3Client()));
 
   while (true) {
     status = reader->Read(offset, kS3ReadAppendableFileBufferSize, &read_chunk,
@@ -416,6 +438,7 @@ Status S3FileSystem::NewReadOnlyMemoryRegionFromFile(
 }
 
 Status S3FileSystem::FileExists(const string& fname) {
+  VLOG(0) << "FileExists " << fname;
   FileStatistics stats;
   TF_RETURN_IF_ERROR(this->Stat(fname, &stats));
   return Status::OK();
@@ -423,7 +446,7 @@ Status S3FileSystem::FileExists(const string& fname) {
 
 Status S3FileSystem::GetChildren(const string& dir,
                                  std::vector<string>* result) {
-  LOG(WARNING) << "Get children for " << dir;
+  VLOG(0) << "Get children for " << dir;
   string bucket, prefix;
   TF_RETURN_IF_ERROR(ParseS3Path(dir, false, &bucket, &prefix));
 
@@ -471,7 +494,7 @@ Status S3FileSystem::GetChildren(const string& dir,
 }
 
 Status S3FileSystem::Stat(const string& fname, FileStatistics* stats) {
-  LOG(WARNING) << "Stat for file " << fname;
+  VLOG(0) << "Stat for file " << fname;
 
   string bucket, object;
   TF_RETURN_IF_ERROR(ParseS3Path(fname, true, &bucket, &object));
@@ -532,11 +555,13 @@ Status S3FileSystem::Stat(const string& fname, FileStatistics* stats) {
 
 Status S3FileSystem::GetMatchingPaths(const string& pattern,
                                       std::vector<string>* results) {
+  VLOG(0) << "GetMatchingPaths " << pattern;
   return internal::GetMatchingPaths(this, Env::Default(), pattern, results);
 }
 
 Status S3FileSystem::DeleteFile(const string& fname) {
   string bucket, object;
+  VLOG(0) << "DeleteFile " << fname;
   TF_RETURN_IF_ERROR(ParseS3Path(fname, false, &bucket, &object));
 
   Aws::S3::Model::DeleteObjectRequest deleteObjectRequest;
@@ -553,8 +578,9 @@ Status S3FileSystem::DeleteFile(const string& fname) {
 
 Status S3FileSystem::CreateDir(const string& dirname) {
   string bucket, object;
+  VLOG(0) << "CreateDir " << dirname;
   TF_RETURN_IF_ERROR(ParseS3Path(dirname, true, &bucket, &object));
-
+  //TODO(rahul) DONT CREATE IF EXISTS
   if (object.empty()) {
     Aws::S3::Model::HeadBucketRequest headBucketRequest;
     headBucketRequest.WithBucket(bucket.c_str());
@@ -575,6 +601,7 @@ Status S3FileSystem::CreateDir(const string& dirname) {
 }
 
 Status S3FileSystem::DeleteDir(const string& dirname) {
+  VLOG(0) << "DeleteDir " << dirname;
   string bucket, object;
   TF_RETURN_IF_ERROR(ParseS3Path(dirname, false, &bucket, &object));
 
@@ -615,6 +642,7 @@ Status S3FileSystem::GetFileSize(const string& fname, uint64* file_size) {
 }
 
 Status S3FileSystem::RenameFile(const string& src, const string& target) {
+  VLOG(0) << "RenameFile " << src << " to " << target;
   string src_bucket, src_object, target_bucket, target_object;
   TF_RETURN_IF_ERROR(ParseS3Path(src, false, &src_bucket, &src_object));
   TF_RETURN_IF_ERROR(
