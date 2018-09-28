@@ -185,7 +185,7 @@ class S3RandomAccessFile : public RandomAccessFile {
 
   Status Read(uint64 offset, size_t n, StringPiece* result,
               char* scratch) const override {
-    VLOG(0) << "ReadfilefromS3 " << bucket_ << "/" << object_;
+    VLOG(1) << "ReadfilefromS3 " << bucket_ << "/" << object_;
     Aws::S3::Model::GetObjectRequest getObjectRequest;
     getObjectRequest.WithBucket(bucket_.c_str()).WithKey(object_.c_str());
     string bytes = strings::StrCat("bytes=", offset, "-", offset + n - 1);
@@ -279,7 +279,7 @@ class S3WritableFile : public WritableFile {
     //                          handle->GetLastError().GetMessage());
     // }
     // return Status::OK();
-    VLOG(0) << "WritefiletoS3 " << bucket_ << "/" << object_;
+    // VLOG(0) << "WritefiletoS3 " << bucket_ << "/" << object_;
         Aws::S3::Model::PutObjectRequest putObjectRequest;
     putObjectRequest.WithBucket(bucket_.c_str()).WithKey(object_.c_str());
     long offset = outfile_->tellp();
@@ -438,7 +438,7 @@ Status S3FileSystem::NewReadOnlyMemoryRegionFromFile(
 }
 
 Status S3FileSystem::FileExists(const string& fname) {
-  VLOG(0) << "FileExists " << fname;
+  VLOG(1) << "FileExists " << fname;
   FileStatistics stats;
   TF_RETURN_IF_ERROR(this->Stat(fname, &stats));
   return Status::OK();
@@ -446,7 +446,7 @@ Status S3FileSystem::FileExists(const string& fname) {
 
 Status S3FileSystem::GetChildren(const string& dir,
                                  std::vector<string>* result) {
-  VLOG(0) << "Get children for " << dir;
+  VLOG(1) << "Get children for " << dir;
   string bucket, prefix;
   TF_RETURN_IF_ERROR(ParseS3Path(dir, false, &bucket, &prefix));
 
@@ -494,7 +494,7 @@ Status S3FileSystem::GetChildren(const string& dir,
 }
 
 Status S3FileSystem::Stat(const string& fname, FileStatistics* stats) {
-  VLOG(0) << "Stat for file " << fname;
+  VLOG(1) << "Stat for file " << fname;
 
   string bucket, object;
   TF_RETURN_IF_ERROR(ParseS3Path(fname, true, &bucket, &object));
@@ -555,13 +555,13 @@ Status S3FileSystem::Stat(const string& fname, FileStatistics* stats) {
 
 Status S3FileSystem::GetMatchingPaths(const string& pattern,
                                       std::vector<string>* results) {
-  VLOG(0) << "GetMatchingPaths " << pattern;
+  VLOG(1) << "GetMatchingPaths " << pattern;
   return internal::GetMatchingPaths(this, Env::Default(), pattern, results);
 }
 
 Status S3FileSystem::DeleteFile(const string& fname) {
   string bucket, object;
-  VLOG(0) << "DeleteFile " << fname;
+  VLOG(1) << "DeleteFile " << fname;
   TF_RETURN_IF_ERROR(ParseS3Path(fname, false, &bucket, &object));
 
   Aws::S3::Model::DeleteObjectRequest deleteObjectRequest;
@@ -578,7 +578,7 @@ Status S3FileSystem::DeleteFile(const string& fname) {
 
 Status S3FileSystem::CreateDir(const string& dirname) {
   string bucket, object;
-  VLOG(0) << "CreateDir " << dirname;
+  VLOG(1) << "CreateDir " << dirname;
   TF_RETURN_IF_ERROR(ParseS3Path(dirname, true, &bucket, &object));
   //TODO(rahul) DONT CREATE IF EXISTS
   if (object.empty()) {
@@ -601,7 +601,7 @@ Status S3FileSystem::CreateDir(const string& dirname) {
 }
 
 Status S3FileSystem::DeleteDir(const string& dirname) {
-  VLOG(0) << "DeleteDir " << dirname;
+  VLOG(1) << "DeleteDir " << dirname;
   string bucket, object;
   TF_RETURN_IF_ERROR(ParseS3Path(dirname, false, &bucket, &object));
 
