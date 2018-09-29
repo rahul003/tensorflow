@@ -19,6 +19,8 @@ limitations under the License.
 #include <functional>
 #include "tensorflow/core/lib/core/status.h"
 
+const std::set<error::Code> default_retriable_errors = {error::UNAVAILABLE, error::DEADLINE_EXCEEDED, error::UNKNOWN};
+
 namespace tensorflow {
 
 class RetryingUtils {
@@ -32,20 +34,14 @@ class RetryingUtils {
   /// If all retries failed, returns the last error status.
   static Status CallWithRetries(const std::function<Status()>& f,
                                 const int64 initial_delay_microseconds,
-                                const std::set<error::Code> retriable_errors);
-
-  static Status CallWithRetries(const std::function<Status()>& f,
-                                const int64 initial_delay_microseconds);
+                                const std::set<error::Code> retriable_errors = default_retriable_errors);
 
   /// sleep_usec is a function that sleeps for the given number of microseconds.
   static Status CallWithRetries(const std::function<Status()>& f,
                                 const int64 initial_delay_microseconds,
                                 const std::function<void(int64)>& sleep_usec,
-                                const std::set<error::Code> retriable_errors);
+                                const std::set<error::Code> retriable_errors = default_retriable_errors);
   
-  static Status CallWithRetries(const std::function<Status()>& f,
-                                const int64 initial_delay_microseconds,
-                                const std::function<void(int64)>& sleep_usec);
   /// \brief A retrying wrapper for a function that deletes a resource.
   ///
   /// The function takes care of the scenario when a delete operation
@@ -53,9 +49,7 @@ class RetryingUtils {
   /// NOT_FOUND, the whole operation is considered a success.
   static Status DeleteWithRetries(const std::function<Status()>& delete_func,
                                   const int64 initial_delay_microseconds,
-                                  const std::set<error::Code> retriable_errors);
-  static Status DeleteWithRetries(const std::function<Status()>& delete_func,
-                                  const int64 initial_delay_microseconds);
+                                  const std::set<error::Code> retriable_errors = default_retriable_errors);
 };
 
 }  // namespace tensorflow

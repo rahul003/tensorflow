@@ -42,11 +42,6 @@ Status RetryingUtils::CallWithRetries(const std::function<Status()>& f,
   }, retriable_errors);
 }
 
-Status RetryingUtils::CallWithRetries(const std::function<Status()>& f,
-                                      const int64 initial_delay_microseconds) {
-  return CallWithRetries(f, initial_delay_microseconds, default_retriable_errors);
-}
-
 Status RetryingUtils::CallWithRetries(
     const std::function<Status()>& f, const int64 initial_delay_microseconds,
     const std::function<void(int64)>& sleep_usec,
@@ -82,12 +77,6 @@ Status RetryingUtils::CallWithRetries(
   }
 }
 
-Status RetryingUtils::CallWithRetries(
-    const std::function<Status()>& f, const int64 initial_delay_microseconds,
-    const std::function<void(int64)>& sleep_usec) {
-  return CallWithRetries(f, initial_delay_microseconds, sleep_usec, default_retriable_errors);
-}
-
 Status RetryingUtils::DeleteWithRetries(
     const std::function<Status()>& delete_func,
     const int64 initial_delay_microseconds, 
@@ -103,12 +92,6 @@ Status RetryingUtils::DeleteWithRetries(
         return status;
       },
       initial_delay_microseconds, retriable_errors);
-}
-
-Status RetryingUtils::DeleteWithRetries(
-    const std::function<Status()>& delete_func,
-    const int64 initial_delay_microseconds) {
-  return DeleteWithRetries(delete_func, initial_delay_microseconds, default_retriable_errors);
 }
 
 }  // namespace tensorflow
