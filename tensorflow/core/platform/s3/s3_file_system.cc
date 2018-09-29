@@ -575,7 +575,6 @@ Status S3FileSystem::DeleteFile(const string& fname) {
 Status S3FileSystem::CreateDir(const string& dirname) {
   string bucket, object;
   TF_RETURN_IF_ERROR(ParseS3Path(dirname, true, &bucket, &object));
-  //TODO(rahul) DONT CREATE IF EXISTS
   if (object.empty()) {
     Aws::S3::Model::HeadBucketRequest headBucketRequest;
     headBucketRequest.WithBucket(bucket.c_str());
