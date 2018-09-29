@@ -34,19 +34,13 @@ template <typename Underlying>
 class RetryingFileSystem : public FileSystem {
  public:
   RetryingFileSystem(std::unique_ptr<Underlying> base_file_system,
-                     std::set<error::Code> retriable_errors = {error::UNAVAILABLE, error::DEADLINE_EXCEEDED, error::UNKNOWN},
+                     std::set<error::Code> retriable_errors = { error::UNAVAILABLE, 
+                                                                error::DEADLINE_EXCEEDED, 
+                                                                error::UNKNOWN},
                      int64 delay_microseconds = 1000000)
       : base_file_system_(std::move(base_file_system)),
         retriable_errors_(retriable_errors),
-        initial_delay_microseconds_(delay_microseconds)
-         {}
-
-  // RetryingFileSystem(std::unique_ptr<Underlying> base_file_system,
-  //                    int64 delay_microseconds = 1000000)
-  //     : base_file_system_(std::move(base_file_system)),
-  //       initial_delay_microseconds_(delay_microseconds) {
-  //         retriable_errors_ = ;
-  //       }
+        initial_delay_microseconds_(delay_microseconds) {}
 
   Status NewRandomAccessFile(
       const string& filename,

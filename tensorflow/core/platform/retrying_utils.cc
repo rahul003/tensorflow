@@ -28,9 +28,7 @@ constexpr int kMaxRetries = 10;
 // Maximum backoff time in microseconds.
 constexpr int64 kMaximumBackoffMicroseconds = 32000000;  // 32 seconds.
 
-const std::set<error::Code> default_retriable_errors = {error::UNAVAILABLE, error::DEADLINE_EXCEEDED, error::UNKNOWN};
-
-bool IsRetriable(const std::set<error::Code> retriable_errors, error::Code code) {
+bool IsRetriable(const std::set<error::Code> retriable_errors, const error::Code code) {
   return retriable_errors.find(code) != retriable_errors.end();
 }
 

@@ -54,10 +54,10 @@ class AWSLogSystem : public Aws::Utils::Logging::LogSystemInterface {
   virtual void LogStream(Aws::Utils::Logging::LogLevel log_level,
                          const char* tag,
                          const Aws::OStringStream& messageStream) override;
-  void LogMessage(Aws::Utils::Logging::LogLevel log_level,
-                  const string& message);
   
  private:
+  void LogMessage(Aws::Utils::Logging::LogLevel log_level,
+                  const string& message);
   
   std::atomic<Aws::Utils::Logging::LogLevel> log_level_;
 

@@ -73,12 +73,11 @@ static const char* kAWSLoggingTag = "AWSLogging";
 
 Aws::Utils::Logging::LogLevel ParseLogLevelFromEnv() {
   Aws::Utils::Logging::LogLevel log_level = Aws::Utils::Logging::LogLevel::Info;
-
-  // const int64_t level = tensorflow::internal::MinLogLevelFromEnv();
-  const char* aws_sdk_log = std::getenv("AWS_S3_LOG");
+  const char* aws_sdk_log = std::getenv("S3_LOG_LEVEL");
   int64_t level;
   if (aws_sdk_log == nullptr) {
-    level = 4;
+    // default logging level of FATAL
+    level = 1;
   } else {
     level = tensorflow::internal::LogLevelStrToInt(aws_sdk_log);
   }
@@ -106,7 +105,7 @@ Aws::Utils::Logging::LogLevel ParseLogLevelFromEnv() {
       log_level = Aws::Utils::Logging::LogLevel::Trace;
       break;
     default:
-      log_level = Aws::Utils::Logging::LogLevel::Info;
+      log_level = Aws::Utils::Logging::LogLevel::Fatal;
       break;
   }
 

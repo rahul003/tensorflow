@@ -330,7 +330,7 @@ class BaseSaverBuilder(object):
       lambda: "_temp_%s/part" % uuid.uuid4().hex)
     
     tmp_checkpoint_prefix = string_ops.string_join(
-      [checkpoint_prefix, _SHARDED_SUFFIX])
+        [checkpoint_prefix, _SHARDED_SUFFIX])
 
     num_shards = len(per_device)
     sharded_saves = []

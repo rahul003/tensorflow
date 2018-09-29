@@ -392,17 +392,13 @@ BundleWriter::BundleWriter(Env* env, StringPiece prefix, const Options& options)
       prefix_(prefix),      
       out_(nullptr),
       size_(0) {  
+  data_path_ = DataFilename(prefix_, 0, 1);
+  metadata_path_ = MetaFilename(prefix_);
   use_temp_file_ = !str_util::StartsWith(prefix_, "s3://");
-  
   if (use_temp_file_) {
-    data_path_ = strings::StrCat(DataFilename(prefix_, 0, 1), ".tempstate",
-                                 random::New64());
-    metadata_path_ = strings::StrCat(MetaFilename(prefix_), ".tempstate",
-                                         random::New64());
-  } else {
-    data_path_ = DataFilename(prefix_, 0, 1);
-    metadata_path_ = MetaFilename(prefix_);
-  }
+    data_path_ = strings::StrCat(data_path_, ".tempstate", random::New64());
+    metadata_path_ = strings::StrCat(metadata_path_, ".tempstate", random::New64());
+  } 
 
   status_ = env_->CreateDir(string(io::Dirname(prefix_)));
   if (!status_.ok() && !errors::IsAlreadyExists(status_)) {
@@ -415,8 +411,7 @@ BundleWriter::BundleWriter(Env* env, StringPiece prefix, const Options& options)
   out_ = std::unique_ptr<FileOutputBuffer>(
       new FileOutputBuffer(wrapper.release(), 8 << 20 /* 8MB write buffer */));
 
-  VLOG(0) << "Writing to file " << data_path_;
-  VLOG(0) << "metadata_path_: " << metadata_path_ << "; prefix:" << prefix_;
+  VLOG(1) << "Writing to file " << data_path_;
 }
 
 Status BundleWriter::Add(StringPiece key, const Tensor& val) {
