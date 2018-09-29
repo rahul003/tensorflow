@@ -500,7 +500,6 @@ Status BundleWriter::Finish() {
     out_ = nullptr;
     if (status_.ok()) {
       if (use_temp_file_) {
-        VLOG(0) << "renaming " << data_path_ << "to :" << DataFilename(prefix_, 0,1);
         status_ = Env::Default()->RenameFile(data_path_,
                                            DataFilename(prefix_, 0, 1));  
       }
@@ -542,7 +541,6 @@ Status BundleWriter::Finish() {
     return status_;
   } else {
     if (use_temp_file_) {
-      VLOG(0) << "renaming " << metadata_path_ << "to :" << MetaFilename(prefix_);
       status_ =
         Env::Default()->RenameFile(metadata_path_, MetaFilename(prefix_));
       if (!status_.ok()) return status_;
@@ -576,7 +574,7 @@ struct MergeState {
 // Returns OK iff the merge succeeds.
 static Status MergeOneBundle(Env* env, StringPiece prefix,
                              MergeState* merge_state) {
-  VLOG(0) << "Merging bundle:" << prefix;
+  VLOG(1) << "Merging bundle:" << prefix;
   const string filename = MetaFilename(prefix);
   uint64 file_size;
   TF_RETURN_IF_ERROR(env->GetFileSize(filename, &file_size));
@@ -686,7 +684,7 @@ Status MergeBundles(Env* env, gtl::ArraySlice<string> prefixes,
 
   // Renames data files to contain the merged bundle prefix.
   for (const auto& p : merge.shard_ids) {
-    VLOG(0) << "Renaming " << p.first << " to "
+    VLOG(1) << "Renaming " << p.first << " to "
             << DataFilename(merged_prefix, p.second, merge.shard_ids.size());
     TF_RETURN_IF_ERROR(env->RenameFile(
         p.first,
@@ -713,7 +711,7 @@ Status MergeBundles(Env* env, gtl::ArraySlice<string> prefixes,
   }
   status.Update(merged_metadata->Close());
   if (!status.ok()) return status;
-  VLOG(0) << "Merged bundles to:" << merged_prefix;
+  VLOG(1) << "Merged bundles to:" << merged_prefix;
 
   // Cleanup: best effort based and ignores errors.
   for (const string& prefix : prefixes) {
