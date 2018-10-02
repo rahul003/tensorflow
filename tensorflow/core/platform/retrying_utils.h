@@ -18,10 +18,13 @@ limitations under the License.
 
 #include <functional>
 #include "tensorflow/core/lib/core/status.h"
+#include "tensorflow/core/lib/core/errors.h"
 
-const std::set<error::Code> default_retriable_errors = {error::UNAVAILABLE, error::DEADLINE_EXCEEDED, error::UNKNOWN};
+
 
 namespace tensorflow {
+
+const std::set<error::Code> default_retriable_errors = {error::UNAVAILABLE, error::DEADLINE_EXCEEDED, error::UNKNOWN};
 
 class RetryingUtils {
  public:
