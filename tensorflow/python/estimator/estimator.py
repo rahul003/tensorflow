@@ -875,7 +875,7 @@ class Estimator(object):
 
       export_dir = export_helpers.get_timestamped_export_dir(export_dir_base)
       
-      if not export_dir.startswith('s3://'):
+      if not export_dir.startswith(b's3://'):
         export_dir = export_helpers.get_temp_export_dir(export_dir)
       
       builder = saved_model_builder.SavedModelBuilder(export_dir)
@@ -922,7 +922,7 @@ class Estimator(object):
           gfile.MakeDirs(dest_path)
           gfile.Copy(source, dest_absolute)
 
-      if not export_dir.startswith('s3://'):
+      if not export_dir.startswith(b's3://'):
         gfile.Rename(export_dir, export_helpers.get_timestamped_export_dir(export_dir_base))
         
       return export_dir

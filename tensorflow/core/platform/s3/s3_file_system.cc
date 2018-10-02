@@ -188,7 +188,7 @@ class S3RandomAccessFile : public RandomAccessFile {
 
   Status Read(uint64 offset, size_t n, StringPiece* result,
               char* scratch) const override {
-    VLOG(1) << "ReadfilefromS3 " << bucket_ << "/" << object_;
+    VLOG(1) << "ReadfilefromS3 s3://" << bucket_ << "/" << object_;
     Aws::S3::Model::GetObjectRequest getObjectRequest;
     getObjectRequest.WithBucket(bucket_.c_str()).WithKey(object_.c_str());
     string bytes = strings::StrCat("bytes=", offset, "-", offset + n - 1);
@@ -281,6 +281,7 @@ class S3WritableFile : public WritableFile {
     //                          handle->GetLastError().GetMessage());
     // }
     
+    VLOG(1) << "WriteFileToS3: s3://" << bucket_ << "/" << object_;
     Aws::S3::Model::PutObjectRequest putObjectRequest;
     putObjectRequest.WithBucket(bucket_.c_str()).WithKey(object_.c_str());
     long offset = outfile_->tellp();
