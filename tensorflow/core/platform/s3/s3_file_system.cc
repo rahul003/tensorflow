@@ -263,38 +263,42 @@ class S3WritableFile : public WritableFile {
       return Status::OK();
     }
 
-    // TODO fix the usage of transfer manager. currently segfaults (huilgolr)
-    // std::shared_ptr<Aws::Transfer::TransferHandle> handle = transfer_manager_.get()->UploadFile(outfile_, 
-    //   bucket_.c_str(), 
-    //   object_.c_str(), 
-    //   "application" ,
-    //   Aws::Map<Aws::String, Aws::String>());
-    // handle->WaitUntilFinished();
-    // int retries = 0;
-    // while (handle->GetStatus() == Aws::Transfer::TransferStatus::FAILED && retries++ < 5) {
-    //   // if multipart upload was used, only the failed parts will be re-sent
-    //   transfer_manager_.get()->RetryUpload(outfile_, handle);
-    // }
-    // if (handle->GetStatus() != Aws::Transfer::TransferStatus::COMPLETED) {
-    //   return errors::Unknown(handle->GetLastError().GetExceptionName(),
-    //                          ": ", handle->GetFailedParts().size(), " failed parts. ", 
-    //                          handle->GetLastError().GetMessage());
-    // }
-    
     VLOG(1) << "WriteFileToS3: s3://" << bucket_ << "/" << object_;
-    Aws::S3::Model::PutObjectRequest putObjectRequest;
-    putObjectRequest.WithBucket(bucket_.c_str()).WithKey(object_.c_str());
-    long offset = outfile_->tellp();
-    outfile_->seekg(0);
-    putObjectRequest.SetBody(outfile_);
-    putObjectRequest.SetContentLength(offset);
-    auto putObjectOutcome = this->s3_client_->PutObject(putObjectRequest);
-    outfile_->clear();
-    outfile_->seekp(offset);
-    if (!putObjectOutcome.IsSuccess()) {
-      return errors::Unknown(putObjectOutcome.GetError().GetExceptionName(),
-                             ": ", putObjectOutcome.GetError().GetMessage());
+    std::shared_ptr<Aws::Transfer::TransferHandle> handle = transfer_manager_.get()->UploadFile(outfile_, 
+      bucket_.c_str(), 
+      object_.c_str(), 
+      "application" ,
+      Aws::Map<Aws::String, Aws::String>());
+    handle->WaitUntilFinished();
+    int retries = 0;
+    while (handle->GetStatus() == Aws::Transfer::TransferStatus::FAILED && retries++ < 5) {
+      // if multipart upload was used, only the failed parts will be re-sent
+      transfer_manager_.get()->RetryUpload(outfile_, handle);
+      handle->WaitUntilFinished();
     }
+    if (handle->GetStatus() != Aws::Transfer::TransferStatus::COMPLETED) {
+      return errors::Unknown(handle->GetLastError().GetExceptionName(),
+                             ": ", handle->GetFailedParts().size(), " failed parts. ", 
+                             handle->GetLastError().GetMessage());
+    }
+    // Older code for reference 
+    // TODO (huilgolr) cleanup
+
+    // Aws::S3::Model::PutObjectRequest putObjectRequest;
+    // putObjectRequest.WithBucket(bucket_.c_str()).WithKey(object_.c_str());
+    // long offset = outfile_->tellp();
+    //  outfile_->seekg(0);
+    //  putObjectRequest.SetBody(outfile_);
+    //  putObjectRequest.SetContentLength(offset);
+    //  auto putObjectOutcome = this->s3_client_->PutObject(putObjectRequest);
+    //  outfile_->clear();
+    //  outfile_->seekp(offset);
+    //  if (!putObjectOutcome.IsSuccess()) {
+    //    return errors::Unknown(putObjectOutcome.GetError().GetExceptionName(),
+    //                           ": ", putObjectOutcome.GetError().GetMessage());
+    //  }
+
+    VLOG(1) << "write done for " << object_;
     return Status::OK();
   }
 
@@ -303,7 +307,6 @@ class S3WritableFile : public WritableFile {
   string object_;
   bool sync_needed_;
   std::shared_ptr<Aws::Utils::TempFile> outfile_;
-  // s3_client_ will be removed once transfer manager works
   std::shared_ptr<Aws::S3::S3Client> s3_client_;
   std::shared_ptr<Aws::Transfer::TransferManager> transfer_manager_;
 };
@@ -343,6 +346,9 @@ std::shared_ptr<Aws::S3::S3Client> S3FileSystem::GetS3Client() {
     };
     options.cryptoOptions.sha256HMACFactory_create_fn = []() {
       return Aws::MakeShared<AWSSHA256HmacFactory>(AWSCryptoAllocationTag);
+    };
+    options.cryptoOptions.secureRandomFactory_create_fn = []() {
+      return Aws::MakeShared<AWSSecureRandomFactory>(AWSCryptoAllocationTag);
     };
     Aws::InitAPI(options);
 
