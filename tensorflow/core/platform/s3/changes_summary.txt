@@ -1,0 +1,32 @@
+Here’s a summary of my changes so far:
+ 
+Completed
+
+Usability:
+
+Added an environment variable S3_LOG_LEVEL to control the logging information from S3 operations.
+By default, this level will be set to 1, which only logs fatal errors. This removes the flood of unnecessary logs that are thrown when using S3 currently which stem from improper usage of AWS_SDK logging levels.
+User can change the level when necessary using the following values: 0 (OFF), 1 (FATAL), 2 (ERROR), 3 (WARNING), 4 (INFO), 5 (DEBUG), 6 (TRACE)
+
+Reliability:
+1. Avoid Listing of Objects: 
+
+a. Skip usage of temp file when writing to S3
+When writing a file to S3, the file system currently writes a temp file locally and syncs at the end by creating a file on S3. This coupled with the fact that S3 provides atomic uploads of files means that we will never see incomplete data uploaded for a file. In this scenario, the current usage of temp files when writing anything to the s3 file system (such as for Checkpoints, SavedModels) are unnecessary. I've removed such usage of temp files for S3 as they not just are unnecessary but cause issues with S3's consistency model. (It may so happen that after writing to a temp file, the file is not visible while moving to final location because changes haven't propagated yet. )
+
+b. Skip usage of temp directory when saving Checkpoints and SavedModels to S3:
+When saving Checkpoints and SavedModels, there is also the use of a temp directory where all files are uploaded and then moved to the final location. This is even more problematic given S3's eventual consistency model. This sequence of operations involves the writing to temp location, listing of files in temp location, copying each file from this temp location to final location, and deleting the temp location. There are multiple issues users have experienced because of this sequence. When listing files in temp directory, in some cases not all files show up in the list. This causes some files to not be copied. While deleting directory, there is another listing of all files in the directory. Again this list may be inconsistent and the deleting of directory fails. So the usage of such temp directory has been bypassed for S3 file system.
+The above issues for Checkpointing and SavedModels have been addressed and verified for both code paths of Estimator based training as well as Session based training.
+
+2. Retry all failed operations before crashing:
+It is recommended to use retries to handle exceptions in the case of unexpected errors due to the eventual consistency paradigm of S3.
+Moved the class retrying_file_system from platform/cloud to platform/ and reused that for S3 file system. It can now retry upto 10 times with increasing backoff times, before it crashes.
+
+#############
+
+In progress:
+
+Using transfer manager to upload files for better performance (multipart uploads and part by part retries).
+I’ve implemented this in TensorFlow, and it works when I test it individually. I can upload files larger than 5GB which weren’t possible before. 
+But I’m currently running into an issue during checkpointing because of this change which causes some stack overflow. I’m investigating the cause.
+ 

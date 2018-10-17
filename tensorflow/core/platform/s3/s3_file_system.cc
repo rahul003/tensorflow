@@ -47,6 +47,7 @@ static const char* kS3FileSystemAllocationTag = "S3FileSystemAllocation";
 static const size_t kS3ReadAppendableFileBufferSize = 1024 * 1024;
 static const int kS3GetChildrenMaxKeys = 100;
 static const int kExecutorPoolSize = 5;
+static const int kUploadRetries = 5;
 static const char* kExecutorTag = "TransferManagerExecutor";
 
 Aws::Client::ClientConfiguration& GetDefaultClientConfig() {
@@ -262,43 +263,30 @@ class S3WritableFile : public WritableFile {
     if (!sync_needed_) {
       return Status::OK();
     }
-
     VLOG(1) << "WriteFileToS3: s3://" << bucket_ << "/" << object_;
-    std::shared_ptr<Aws::Transfer::TransferHandle> handle = transfer_manager_.get()->UploadFile(outfile_, 
-      bucket_.c_str(), 
-      object_.c_str(), 
-      "application" ,
-      Aws::Map<Aws::String, Aws::String>());
+    long offset = outfile_->tellp();
+    std::shared_ptr <Aws::Transfer::TransferHandle> handle =
+      transfer_manager_.get()->UploadFile(outfile_,
+                                          bucket_.c_str(),
+                                          object_.c_str(),
+                                          "application/octet-stream",
+                                          Aws::Map<Aws::String, Aws::String>());
     handle->WaitUntilFinished();
     int retries = 0;
-    while (handle->GetStatus() == Aws::Transfer::TransferStatus::FAILED && retries++ < 5) {
+    while (handle->GetStatus() == Aws::Transfer::TransferStatus::FAILED && retries++ < kUploadRetries) {
       // if multipart upload was used, only the failed parts will be re-sent
+      VLOG(1) << "Retrying Upload of s3://" <<bucket_ << "/" << object_ << " after failure. "
+        "Current retry count:" << retries;
       transfer_manager_.get()->RetryUpload(outfile_, handle);
       handle->WaitUntilFinished();
-    }
+     }
     if (handle->GetStatus() != Aws::Transfer::TransferStatus::COMPLETED) {
       return errors::Unknown(handle->GetLastError().GetExceptionName(),
-                             ": ", handle->GetFailedParts().size(), " failed parts. ", 
+                             ": ", handle->GetFailedParts().size(), " failed parts. ",
                              handle->GetLastError().GetMessage());
     }
-    // Older code for reference 
-    // TODO (huilgolr) cleanup
-
-    // Aws::S3::Model::PutObjectRequest putObjectRequest;
-    // putObjectRequest.WithBucket(bucket_.c_str()).WithKey(object_.c_str());
-    // long offset = outfile_->tellp();
-    //  outfile_->seekg(0);
-    //  putObjectRequest.SetBody(outfile_);
-    //  putObjectRequest.SetContentLength(offset);
-    //  auto putObjectOutcome = this->s3_client_->PutObject(putObjectRequest);
-    //  outfile_->clear();
-    //  outfile_->seekp(offset);
-    //  if (!putObjectOutcome.IsSuccess()) {
-    //    return errors::Unknown(putObjectOutcome.GetError().GetExceptionName(),
-    //                           ": ", putObjectOutcome.GetError().GetMessage());
-    //  }
-
-    VLOG(1) << "write done for " << object_;
+    outfile_->clear();
+    outfile_->seekp(offset);
     return Status::OK();
   }
 
