@@ -86,11 +86,8 @@ class S3FileSystem : public FileSystem {
   std::shared_ptr<Aws::Utils::Threading::PooledThreadExecutor> GetExecutor();
   std::shared_ptr<Aws::Utils::Threading::PooledThreadExecutor> executor_;
 
-  // Lock held when checking for s3_client_ initialization.
-  mutex client_lock_;
-
-  // Lock held when checking for transfer_manager_ initialization.
-  mutex manager_lock_;
+  // Lock held when checking for s3_client_ and transfer_manager_ initialization
+  mutex initialization_lock_;
 
 };
 

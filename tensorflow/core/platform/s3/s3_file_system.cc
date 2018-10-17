@@ -315,7 +315,7 @@ class S3ReadOnlyMemoryRegion : public ReadOnlyMemoryRegion {
 
 S3FileSystem::S3FileSystem()
     : s3_client_(nullptr, ShutdownClient), 
-      client_lock_(),
+      initialization_lock_(),
       transfer_manager_(nullptr, ShutdownTransferManager),
       executor_(nullptr, ShutdownExecutor) {}
 
@@ -323,7 +323,7 @@ S3FileSystem::~S3FileSystem() {}
 
 // Initializes s3_client_, if needed, and returns it.
 std::shared_ptr<Aws::S3::S3Client> S3FileSystem::GetS3Client() {
-  std::lock_guard<mutex> lock(this->client_lock_);
+  std::lock_guard<mutex> lock(this->initialization_lock_);
 
   if (this->s3_client_.get() == nullptr) {
     AWSLogSystem::InitializeAWSLogging();
@@ -355,10 +355,11 @@ std::shared_ptr<Aws::S3::S3Client> S3FileSystem::GetS3Client() {
 }
 
 std::shared_ptr<Aws::Transfer::TransferManager> S3FileSystem::GetTransferManager() {
-  std::lock_guard<mutex> lock(this->manager_lock_);
+  std::shared_ptr<Aws::S3::S3Client> s3_client = this->GetS3Client();
+  std::lock_guard<mutex> lock(this->initialization_lock_);
   if (this->transfer_manager_.get() == nullptr) {
     Aws::Transfer::TransferManagerConfiguration config(this->GetExecutor().get());
-    config.s3Client = this->GetS3Client();
+    config.s3Client = s3_client;
     this->transfer_manager_ = Aws::Transfer::TransferManager::Create(config);
   }
   return this->transfer_manager_;
