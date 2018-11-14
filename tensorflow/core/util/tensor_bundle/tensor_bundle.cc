@@ -394,7 +394,7 @@ BundleWriter::BundleWriter(Env* env, StringPiece prefix, const Options& options)
       size_(0) {  
   data_path_ = DataFilename(prefix_, 0, 1);
   metadata_path_ = MetaFilename(prefix_);
-  use_temp_file_ = !str_util::StartsWith(prefix_, "s3://");
+  use_temp_file_ = env_->NeedsTempLocation(prefix_).ok();
   if (use_temp_file_) {
     data_path_ = strings::StrCat(data_path_, ".tempstate", random::New64());
     metadata_path_ = strings::StrCat(metadata_path_, ".tempstate", random::New64());

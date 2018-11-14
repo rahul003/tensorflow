@@ -36,12 +36,14 @@ from tensorflow.python.eager import context
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import device as pydev
 from tensorflow.python.framework import errors
+from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import meta_graph
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import gen_io_ops
 from tensorflow.python.ops import io_ops
+from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import resource_variable_ops
 from tensorflow.python.ops import state_ops
 from tensorflow.python.ops import string_ops
@@ -325,10 +327,13 @@ class BaseSaverBuilder(object):
     # prefix directly, instead of any physical pathname.  (On failure and
     # subsequent restore, an outdated and orphaned temporary directory can be
     # safely removed.)
-    _SHARDED_SUFFIX = control_flow_ops.cond(string_ops.regex_full_match(checkpoint_prefix, '^s3://.*'), 
-      lambda: "/part",
-      lambda: "_temp_%s/part" % uuid.uuid4().hex)
     
+    save_dir = string_ops.string_join([checkpoint_prefix, ])
+  
+    _SHARDED_SUFFIX = control_flow_ops.cond(self._use_temp_location,
+      lambda: "_temp_%s/part" % uuid.uuid4().hex,
+      lambda: "/part")
+
     tmp_checkpoint_prefix = string_ops.string_join(
         [checkpoint_prefix, _SHARDED_SUFFIX])
 
@@ -779,6 +784,7 @@ class BaseSaverBuilder(object):
 
     with ops.name_scope(name, "save",
                         [saveable.op for saveable in saveables]) as name:
+      self._use_temp_location = math_ops.cast(gfile.NeedsTempLocation(filename or "model"), dtypes.bool)
       # Add the Constant string tensor for the filename.
       filename_tensor = constant_op.constant(filename or "model")
 

@@ -91,9 +91,10 @@ def save_keras_model(
     raise NotImplementedError
 
   export_dir = export_helpers.get_timestamped_export_dir(saved_model_path)
-  temp_export_dir = export_helpers.get_temp_export_dir(export_dir)
+  if gfile.NeedsTempLocation(export_dir):
+    export_dir = export_helpers.get_temp_export_dir(export_dir)
 
-  builder = saved_model_builder.SavedModelBuilder(temp_export_dir)
+  builder = saved_model_builder.SavedModelBuilder(export_dir)
 
   # Manually save variables to export them in an object-based checkpoint. This
   # skips the `builder.add_meta_graph_and_variables()` step, which saves a
@@ -129,7 +130,8 @@ def save_keras_model(
 
   builder.save(as_text)
 
-  gfile.Rename(temp_export_dir, export_dir)
+  if gfile.NeedsTempLocation(export_dir):
+    gfile.Rename(export_dir, export_helpers.get_timestamped_export_dir(export_dir_base))
   return export_dir
 
 

@@ -874,8 +874,7 @@ class Estimator(object):
         raise ValueError("Couldn't find trained model at %s." % self._model_dir)
 
       export_dir = export_helpers.get_timestamped_export_dir(export_dir_base)
-      
-      if not export_dir.startswith(b's3://'):
+      if gfile.NeedsTempLocation(export_dir):
         export_dir = export_helpers.get_temp_export_dir(export_dir)
       
       builder = saved_model_builder.SavedModelBuilder(export_dir)
@@ -922,9 +921,8 @@ class Estimator(object):
           gfile.MakeDirs(dest_path)
           gfile.Copy(source, dest_absolute)
 
-      if not export_dir.startswith(b's3://'):
+      if gfile.NeedsTempLocation(export_dir):
         gfile.Rename(export_dir, export_helpers.get_timestamped_export_dir(export_dir_base))
-        
       return export_dir
 
   def _add_meta_graph_for_mode(self,

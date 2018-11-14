@@ -207,6 +207,16 @@ class FileSystem {
   ///  * UNIMPLEMENTED - The file factory doesn't support directories.
   virtual Status IsDirectory(const string& fname);
 
+  /// \brief Returns whether the given path needs a temp location when writing safely
+  ///
+  /// Typical return codes (not guaranteed exhaustive):
+  ///  * OK - The path exists and is a directory.
+  ///  * FAILED_PRECONDITION - The path exists and is not a directory.
+  ///  * NOT_FOUND - The path entry does not exist.
+  ///  * PERMISSION_DENIED - Insufficient permissions.
+  ///  * UNIMPLEMENTED - The file factory doesn't support directories.
+  virtual Status NeedsTempLocation(const string& path);
+
   /// \brief Flushes any cached filesystem objects from memory.
   virtual void FlushCaches();
 

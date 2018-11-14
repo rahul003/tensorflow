@@ -613,3 +613,8 @@ def file_crc32(filename, block_size=_DEFAULT_BLOCK_SIZE):
       chunk = f.read(n=block_size)
   return hex(crc & 0xFFFFFFFF)
 
+@tf_export("gfile.NeedsTempLocation")
+def needs_temp_location(path):
+  status = c_api_util.ScopedTFStatus()
+  return pywrap_tensorflow.NeedsTempLocation(compat.as_bytes(path), status)
+  
