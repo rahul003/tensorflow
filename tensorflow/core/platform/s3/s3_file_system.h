@@ -60,6 +60,8 @@ class S3FileSystem : public FileSystem {
   Status GetFileSize(const string& fname, uint64* size) override;
 
   Status RenameFile(const string& src, const string& target) override;
+  
+  virtual Status NeedsTempLocation(const string& path) override;
 
  private:
   // Returns the member S3 client, initializing as-needed.
