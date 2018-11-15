@@ -125,6 +125,11 @@ class RetryingFileSystem : public FileSystem {
         initial_delay_microseconds_, retriable_errors_);
   }
 
+  Status NeedsTempLocation(const string& path) override {
+    // this does not need to be retried
+    return base_file_system_->NeedsTempLocation(path);
+  }
+
   Status DeleteRecursively(const string& dirname, int64* undeleted_files,
                            int64* undeleted_dirs) override {
     return RetryingUtils::DeleteWithRetries(

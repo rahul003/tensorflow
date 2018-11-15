@@ -1442,7 +1442,6 @@ class Saver(object):
       raise TypeError("'sess' must be a Session; %s" % sess)
 
     save_path_parent = os.path.dirname(save_path)
-    print(save_path, gfile.NeedsTempLocation(checkpoint_file))
     if not self._is_empty:
       try:
         if context.executing_eagerly():

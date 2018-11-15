@@ -705,7 +705,6 @@ Status S3FileSystem::RenameFile(const string& src, const string& target) {
 }
 
 Status S3FileSystem::NeedsTempLocation(const string& path) {
-  LOG(INFO) << string(path);
   return Status(tensorflow::error::FAILED_PRECONDITION, "Does not need a temp location");
 }
 
