@@ -31,7 +31,7 @@ struct RetryConfig {
               int max_retries = 10,
               std::set<error::Code> retriable_errors = { error::UNAVAILABLE,
                                   error::DEADLINE_EXCEEDED, 
-                                  error::UNKNOWN},) {
+                                  error::UNKNOWN}) {
     this->init_delay_time_us = init_delay_time_us;
     this->max_delay_time_us = max_delay_time_us;
     this->max_retries = max_retries;

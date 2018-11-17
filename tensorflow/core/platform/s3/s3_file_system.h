@@ -98,12 +98,12 @@ class RetryingS3FileSystem : public RetryingFileSystem<S3FileSystem> {
  public:
   RetryingS3FileSystem()
       : RetryingFileSystem(std::unique_ptr<S3FileSystem>(new S3FileSystem),
-        { error::UNAVAILABLE, 
-          error::DEADLINE_EXCEEDED, 
-          error::UNKNOWN, 
-          error::FAILED_PRECONDITION,
-          error::INTERNAL},
-        1000000) {}
+        RetryConfig(100000 /* init_delay_time_us */,
+                    32000000 /* max_delay_time_us */,
+                    10 /* max_retries */,
+                    { error::UNAVAILABLE, error::DEADLINE_EXCEEDED, 
+                      error::UNKNOWN, error::FAILED_PRECONDITION,
+                      error::INTERNAL})) {}
 };
 
 }  // namespace tensorflow
