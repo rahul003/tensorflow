@@ -328,9 +328,6 @@ class BaseSaverBuilder(object):
     # prefix directly, instead of any physical pathname.  (On failure and
     # subsequent restore, an outdated and orphaned temporary directory can be
     # safely removed.)
-    
-    save_dir = string_ops.string_join([checkpoint_prefix, ])
-    
     _SHARDED_SUFFIX = control_flow_ops.cond(use_temp_location, 
       lambda: "_temp_%s/part" % uuid.uuid4().hex,
       lambda: "/part")
@@ -764,7 +761,6 @@ class BaseSaverBuilder(object):
 
   def _build_internal(self,
                       names_to_saveables,
-                      use_temp_location,
                       reshape=False,
                       sharded=False,
                       max_to_keep=5,
@@ -774,6 +770,7 @@ class BaseSaverBuilder(object):
                       filename="model",
                       build_save=True,
                       build_restore=True,
+                      use_temp_location=True
                       ):
     """build() with option to only perform save and restore."""
     if not context.executing_eagerly() and (not build_save or

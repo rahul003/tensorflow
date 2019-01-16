@@ -73,7 +73,7 @@ static const char* kAWSLoggingTag = "AWSLogging";
 
 Aws::Utils::Logging::LogLevel ParseLogLevelFromEnv() {
   Aws::Utils::Logging::LogLevel log_level = Aws::Utils::Logging::LogLevel::Info;
-  const char* aws_sdk_log = std::getenv("S3_LOG_LEVEL");
+  const char* aws_sdk_log = std::getenv("TF_S3_LOG_LEVEL");
   int64_t level;
   if (aws_sdk_log == nullptr) {
     // default logging level of FATAL

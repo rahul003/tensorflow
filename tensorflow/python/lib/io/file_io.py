@@ -414,6 +414,10 @@ def rename(oldname, newname, overwrite=False):
     pywrap_tensorflow.RenameFile(
         compat.as_bytes(oldname), compat.as_bytes(newname), overwrite, status)
 
+@tf_export("gfile.NeedsTempLocation")
+def needs_temp_location(path):
+  status = c_api_util.ScopedTFStatus()
+  return pywrap_tensorflow.NeedsTempLocation(compat.as_bytes(path), status)
 
 def atomic_write_string_to_file(filename, contents, overwrite=True):
   """Writes to `filename` atomically.
@@ -430,7 +434,7 @@ def atomic_write_string_to_file(filename, contents, overwrite=True):
     overwrite: boolean, if false it's an error for `filename` to be occupied by
         an existing file.
   """
-  if filename.startswith('s3://'):
+  if not needs_temp_location(filename):
     write_string_to_file(filename, contents)
   else:
     temp_pathname = filename + ".tmp" + uuid.uuid4().hex

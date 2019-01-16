@@ -102,7 +102,7 @@ def save_keras_model(
   # TODO(b/113134168): Add fn to Builder to save with object-based saver.
   # TODO(b/113178242): This should only export the model json structure. Only
   # one save is needed once the weights can be copied from the model to clone.
-  checkpoint_path = _export_model_json_and_variables(model, temp_export_dir)
+  checkpoint_path = _export_model_json_and_variables(model, export_dir)
 
   # Export each mode. Use ModeKeys enums defined for `Estimator` to ensure that
   # Keras models and `Estimator`s are exported with the same format.

@@ -172,7 +172,8 @@ bool NeedsTempLocation(const string& path, TF_Status* out_status) {
   if (status.ok()) {
     return true;
   }
-  // FAILED_PRECONDITION Status response means path exists but isn't a dir.
+  // FAILED_PRECONDITION Status response means that writing to path does not 
+  // need a temp location
   if (status.code() != tensorflow::error::FAILED_PRECONDITION) {
     Set_TF_Status_from_Status(out_status, status);
   }
