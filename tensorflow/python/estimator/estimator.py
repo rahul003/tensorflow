@@ -924,7 +924,7 @@ class Estimator(object):
           gfile.MakeDirs(dest_path)
           gfile.Copy(source, dest_absolute)
       if gfile.NeedsTempLocation(export_dir):
-        gfile.Rename(temp_export_dir, export_dir)
+        gfile.Rename(export_dir, export_helpers.get_timestamped_export_dir(export_dir_base))
       return export_dir
 
   def _add_meta_graph_for_mode(self,
