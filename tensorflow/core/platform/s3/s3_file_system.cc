@@ -553,6 +553,7 @@ Status S3FileSystem::GetMatchingPaths(const string& pattern,
 }
 
 Status S3FileSystem::DeleteFile(const string& fname) {
+  VLOG(1) << "DeleteFile:" << fname;
   string bucket, object;
   TF_RETURN_IF_ERROR(ParseS3Path(fname, false, &bucket, &object));
 

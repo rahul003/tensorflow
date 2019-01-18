@@ -131,7 +131,7 @@ def save_keras_model(
   builder.save(as_text)
 
   if gfile.NeedsTempLocation(export_dir):
-    gfile.Rename(export_dir, export_helpers.get_timestamped_export_dir(export_dir_base))
+    gfile.Rename(export_dir, export_helpers.get_timestamped_export_dir(saved_model_path))
   return export_dir
 
 
