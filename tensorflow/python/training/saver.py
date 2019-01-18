@@ -1152,7 +1152,7 @@ class Saver(object):
       else:
         use_temp_location = self._use_temp_location
       self._is_empty = False
-      
+ 
       self.saver_def = self._builder._build_internal(  # pylint: disable=protected-access
           self._var_list,
           reshape=self._reshape,

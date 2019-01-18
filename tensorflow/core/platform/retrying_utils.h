@@ -20,8 +20,6 @@ limitations under the License.
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/core/errors.h"
 
-
-
 namespace tensorflow {
 
 // Default time before reporting failure: ~100 seconds.
