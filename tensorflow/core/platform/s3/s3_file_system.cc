@@ -172,6 +172,7 @@ class S3RandomAccessFile : public RandomAccessFile {
 
   Status Read(uint64 offset, size_t n, StringPiece* result,
               char* scratch) const override {
+    VLOG(1) << "ReadfilefromS3 s3://" << bucket_ << "/" << object_;
     Aws::S3::Model::GetObjectRequest getObjectRequest;
     getObjectRequest.WithBucket(bucket_.c_str()).WithKey(object_.c_str());
     string bytes = strings::StrCat("bytes=", offset, "-", offset + n - 1);
@@ -243,6 +244,7 @@ class S3WritableFile : public WritableFile {
     if (!sync_needed_) {
       return Status::OK();
     }
+    VLOG(1) << "WriteFileToS3: s3://" << bucket_ << "/" << object_;
     Aws::S3::Model::PutObjectRequest putObjectRequest;
     putObjectRequest.WithBucket(bucket_.c_str()).WithKey(object_.c_str());
     long offset = outfile_->tellp();
@@ -495,6 +497,7 @@ Status S3FileSystem::GetMatchingPaths(const string& pattern,
 }
 
 Status S3FileSystem::DeleteFile(const string& fname) {
+  VLOG(1) << "DeleteFile:" << fname;
   string bucket, object;
   TF_RETURN_IF_ERROR(ParseS3Path(fname, false, &bucket, &object));
 
@@ -534,6 +537,7 @@ Status S3FileSystem::CreateDir(const string& dirname) {
 }
 
 Status S3FileSystem::DeleteDir(const string& dirname) {
+  VLOG(1) << "DeleteDir: " << dirname;
   string bucket, object;
   TF_RETURN_IF_ERROR(ParseS3Path(dirname, false, &bucket, &object));
 
@@ -574,6 +578,7 @@ Status S3FileSystem::GetFileSize(const string& fname, uint64* file_size) {
 }
 
 Status S3FileSystem::RenameFile(const string& src, const string& target) {
+  VLOG(1) << "RenameFile from: " << src << " to: " << target;
   string src_bucket, src_object, target_bucket, target_object;
   TF_RETURN_IF_ERROR(ParseS3Path(src, false, &src_bucket, &src_object));
   TF_RETURN_IF_ERROR(
