@@ -199,13 +199,17 @@ class S3RandomAccessFile : public RandomAccessFile {
     });
     auto getObjectOutcome = this->s3_client_->GetObject(getObjectRequest);
     if (!getObjectOutcome.IsSuccess()) {
-      n = 0;
-      *result = StringPiece(scratch, n);
-      return Status(error::OUT_OF_RANGE, "Read less bytes than requested");
+      auto error = getObjectOutcome.GetError();
+      if (error.GetResponseCode() == Aws::Http::HttpResponseCode::REQUESTED_RANGE_NOT_SATISFIABLE) {
+        n = 0;
+        *result = StringPiece(scratch, n);
+        return Status(error::OUT_OF_RANGE, "Read less bytes than requested");
+      } else {
+        return Status(error::UNKNOWN, error.GetExceptionName(), error.GetMessage());
+      }
     }
     n = getObjectOutcome.GetResult().GetContentLength();
     getObjectOutcome.GetResult().GetBody().read(scratch, n);
-
     *result = StringPiece(scratch, n);
     return Status::OK();
   }
