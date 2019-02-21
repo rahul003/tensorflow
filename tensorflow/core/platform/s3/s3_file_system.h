@@ -103,7 +103,7 @@ class RetryingS3FileSystem : public RetryingFileSystem<S3FileSystem> {
                     10 /* max_retries */,
                     { error::UNAVAILABLE, error::DEADLINE_EXCEEDED, 
                       error::UNKNOWN, error::FAILED_PRECONDITION,
-                      error::INTERNAL, error::NOT_FOUND })) {}
+                      error::INTERNAL})) {}
 };
 
 }  // namespace tensorflow
