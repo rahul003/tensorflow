@@ -205,7 +205,7 @@ class S3RandomAccessFile : public RandomAccessFile {
         *result = StringPiece(scratch, n);
         return Status(error::OUT_OF_RANGE, "Read less bytes than requested");
       } else {
-        return Status(error::UNKNOWN, error.GetExceptionName(), error.GetMessage());
+        return errors::Unknown(error.GetExceptionName(), error.GetMessage());
       }
     }
     n = getObjectOutcome.GetResult().GetContentLength();
