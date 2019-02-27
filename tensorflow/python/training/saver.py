@@ -287,7 +287,7 @@ class BaseSaverBuilder(object):
     save = self.save_op(filename_tensor, saveables)
     return control_flow_ops.with_dependencies([save], filename_tensor)
 
-  def _AddShardedSaveOpsForV2(self, checkpoint_prefix, per_device, use_temp_location):
+  def _AddShardedSaveOpsForV2(self, checkpoint_prefix, per_device):
     """Add ops to save the params per shard, for the V2 format.
 
     Note that the sharded save procedure for the V2 format is different from
@@ -328,9 +328,9 @@ class BaseSaverBuilder(object):
     # prefix directly, instead of any physical pathname.  (On failure and
     # subsequent restore, an outdated and orphaned temporary directory can be
     # safely removed.)
-    _SHARDED_SUFFIX = control_flow_ops.cond(use_temp_location, 
-      lambda: "_temp_%s/part" % uuid.uuid4().hex,
-      lambda: ".part")
+    _SHARDED_SUFFIX = control_flow_ops.cond(string_ops.regex_full_match(checkpoint_prefix, '^s3://.*'),
+      lambda: ".part",
+      lambda: "_temp_%s/part" % uuid.uuid4().hex)
 
     tmp_checkpoint_prefix = string_ops.string_join(
         [checkpoint_prefix, _SHARDED_SUFFIX])
@@ -360,7 +360,7 @@ class BaseSaverBuilder(object):
           # sharded spec suffix.
           return array_ops.identity(checkpoint_prefix)
 
-  def _AddShardedSaveOps(self, filename_tensor, per_device, use_temp_location):
+  def _AddShardedSaveOps(self, filename_tensor, per_device):
     """Add ops to save the params per shard.
 
     Args:
@@ -372,7 +372,7 @@ class BaseSaverBuilder(object):
       An op to save the variables.
     """
     if self._write_version == saver_pb2.SaverDef.V2:
-      return self._AddShardedSaveOpsForV2(filename_tensor, per_device, use_temp_location)
+      return self._AddShardedSaveOpsForV2(filename_tensor, per_device)
 
     num_shards = len(per_device)
     sharded_saves = []
@@ -769,8 +769,7 @@ class BaseSaverBuilder(object):
                       restore_sequentially=False,
                       filename="model",
                       build_save=True,
-                      build_restore=True,
-                      use_temp_location=True
+                      build_restore=True
                       ):
     """build() with option to only perform save and restore."""
     if not context.executing_eagerly() and (not build_save or
@@ -791,7 +790,7 @@ class BaseSaverBuilder(object):
       if sharded:
         per_device = self._GroupByDevices(saveables)
         if build_save:
-          save_tensor = self._AddShardedSaveOps(filename_tensor, per_device, use_temp_location)
+          save_tensor = self._AddShardedSaveOps(filename_tensor, per_device)
         if build_restore:
           restore_op = self._AddShardedRestoreOps(filename_tensor, per_device,
                                                   restore_sequentially, reshape)
@@ -1101,8 +1100,6 @@ class Saver(object):
     self._write_version = write_version
     self._pad_step_number = pad_step_number
     self._filename = filename
-    if not context.executing_eagerly():
-      self._use_temp_location = array_ops.placeholder(dtypes.bool)
     self._last_checkpoints = []
     self._checkpoints_to_be_deleted = []
     if context.executing_eagerly():
@@ -1147,10 +1144,6 @@ class Saver(object):
           return
         else:
           raise ValueError("No variables to save")
-      if context.executing_eagerly():
-        use_temp_location = gfile.NeedsTempLocation(checkpoint_path)
-      else:
-        use_temp_location = self._use_temp_location
       self._is_empty = False
  
       self.saver_def = self._builder._build_internal(  # pylint: disable=protected-access
@@ -1162,8 +1155,7 @@ class Saver(object):
           name=self._name,
           restore_sequentially=self._restore_sequentially,
           filename=checkpoint_path,
-          build_save=build_save, build_restore=build_restore,
-          use_temp_location=use_temp_location)
+          build_save=build_save, build_restore=build_restore)
     elif self.saver_def and self._name:
       # Since self._name is used as a name_scope by builder(), we are
       # overloading the use of this field to represent the "import_scope" as
@@ -1453,8 +1445,7 @@ class Saver(object):
         else:
           model_checkpoint_path = sess.run(
               self.saver_def.save_tensor_name,
-              {self.saver_def.filename_tensor_name: checkpoint_file,
-               self._use_temp_location: gfile.NeedsTempLocation(checkpoint_file)})
+              {self.saver_def.filename_tensor_name: checkpoint_file })
 
         model_checkpoint_path = compat.as_str(model_checkpoint_path)
         if write_state:

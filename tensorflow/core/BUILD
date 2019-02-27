@@ -4738,28 +4738,28 @@ tf_cc_tests(
     ],
 )
 
-tf_cc_tests(
-    name = "common_runtime_lower_if_while_test",
-    size = "small",
-    srcs = ["common_runtime/lower_if_while_test.cc"],
-    deps = [
-        ":all_kernels",
-        ":core_cpu",
-        ":core_cpu_internal",
-        ":direct_session",
-        ":framework",
-        ":framework_internal",
-        ":lib",
-        ":test",
-        ":test_main",
-        ":testlib",
-        "//tensorflow/cc:cc_ops",
-        "//tensorflow/cc:cc_ops_internal",
-        "//tensorflow/cc:client_session",
-        "//tensorflow/cc:function_ops",
-        "//tensorflow/cc:ops",
-    ],
-)
+#tf_cc_tests(
+#    name = "common_runtime_lower_if_while_test",
+#    size = "small",
+#    srcs = ["common_runtime/lower_if_while_test.cc"],
+#    deps = [
+#        ":all_kernels",
+#        ":core_cpu",
+#        ":core_cpu_internal",
+#        ":direct_session",
+#        ":framework",
+#        ":framework_internal",
+#        ":lib",
+#        ":test",
+#        ":test_main",
+#        ":testlib",
+#        "//tensorflow/cc:cc_ops",
+#        "//tensorflow/cc:cc_ops_internal",
+#        "//tensorflow/cc:client_session",
+#        "//tensorflow/cc:function_ops",
+#        "//tensorflow/cc:ops",
+#    ],
+#)
 
 tf_cc_test(
     name = "retrying_file_system_test",
