@@ -50,6 +50,8 @@ cc_library(
         "aws-cpp-sdk-kinesis/source/**/*.cpp",
         "aws-cpp-sdk-s3/include/**/*.h",
         "aws-cpp-sdk-s3/source/**/*.cpp",
+        "aws-cpp-sdk-transfer/include/**/*.h",
+        "aws-cpp-sdk-transfer/source/**/*.cpp",
     ]),
     hdrs = [
         "aws-cpp-sdk-core/include/aws/core/SDKConfig.h",
@@ -76,9 +78,15 @@ cc_library(
         "aws-cpp-sdk-core/include/",
         "aws-cpp-sdk-kinesis/include/",
         "aws-cpp-sdk-s3/include/",
+        "aws-cpp-sdk-transfer/include/",
     ],
     deps = [
         "@curl",
+    ],
+    copts = [
+        "-DAWS_SDK_VERSION_MAJOR=1", 
+        "-DAWS_SDK_VERSION_MINOR=5", 
+        "-DAWS_SDK_VERSION_PATCH=8"
     ],
 )
 

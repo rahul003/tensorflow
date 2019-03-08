@@ -36,12 +36,14 @@ from tensorflow.python.eager import context
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import device as pydev
 from tensorflow.python.framework import errors
+from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import meta_graph
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import gen_io_ops
 from tensorflow.python.ops import io_ops
+from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import resource_variable_ops
 from tensorflow.python.ops import state_ops
 from tensorflow.python.ops import string_ops
@@ -281,6 +283,7 @@ class BaseSaverBuilder(object):
     Returns:
       A tensor with the filename used to save.
     """
+
     save = self.save_op(filename_tensor, saveables)
     return control_flow_ops.with_dependencies([save], filename_tensor)
 
@@ -325,7 +328,10 @@ class BaseSaverBuilder(object):
     # prefix directly, instead of any physical pathname.  (On failure and
     # subsequent restore, an outdated and orphaned temporary directory can be
     # safely removed.)
-    _SHARDED_SUFFIX = "_temp_%s/part" % uuid.uuid4().hex
+    _SHARDED_SUFFIX = control_flow_ops.cond(string_ops.regex_full_match(checkpoint_prefix, '^s3://.*'),
+      lambda: ".part",
+      lambda: "_temp_%s/part" % uuid.uuid4().hex)
+
     tmp_checkpoint_prefix = string_ops.string_join(
         [checkpoint_prefix, _SHARDED_SUFFIX])
 
@@ -755,7 +761,8 @@ class BaseSaverBuilder(object):
                       restore_sequentially=False,
                       filename="model",
                       build_save=True,
-                      build_restore=True):
+                      build_restore=True
+                      ):
     """build() with option to only perform save and restore."""
     if not context.executing_eagerly() and (not build_save or
                                             not build_restore):
@@ -1130,7 +1137,7 @@ class Saver(object):
         else:
           raise ValueError("No variables to save")
       self._is_empty = False
-
+ 
       self.saver_def = self._builder._build_internal(  # pylint: disable=protected-access
           self._var_list,
           reshape=self._reshape,
@@ -1430,7 +1437,7 @@ class Saver(object):
         else:
           model_checkpoint_path = sess.run(
               self.saver_def.save_tensor_name,
-              {self.saver_def.filename_tensor_name: checkpoint_file})
+              {self.saver_def.filename_tensor_name: checkpoint_file })
 
         model_checkpoint_path = compat.as_str(model_checkpoint_path)
         if write_state:

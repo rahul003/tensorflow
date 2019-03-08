@@ -23,7 +23,7 @@ limitations under the License.
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/random/random.h"
-#include "tensorflow/core/platform/cloud/retrying_utils.h"
+#include "tensorflow/core/platform/retrying_utils.h"
 #include "tensorflow/core/platform/env.h"
 #include "tensorflow/core/platform/file_system.h"
 
@@ -121,6 +121,11 @@ class RetryingFileSystem : public FileSystem {
         initial_delay_microseconds_);
   }
 
+  Status NeedsTempLocation(const string& path) override {
+    // this does not need to be retried
+    return base_file_system_->NeedsTempLocation(path);
+  }
+
   Status DeleteRecursively(const string& dirname, int64* undeleted_files,
                            int64* undeleted_dirs) override {
     return RetryingUtils::DeleteWithRetries(
@@ -137,8 +142,7 @@ class RetryingFileSystem : public FileSystem {
 
  private:
   std::unique_ptr<Underlying> base_file_system_;
-  const int64 initial_delay_microseconds_;
-
+  const RetryConfig retry_config_;
   TF_DISALLOW_COPY_AND_ASSIGN(RetryingFileSystem);
 };
 
