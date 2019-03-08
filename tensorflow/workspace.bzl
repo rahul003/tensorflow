@@ -599,7 +599,6 @@ def tf_workspace(path_prefix = "", tf_repo_name = ""):
             "https://mirror.bazel.build/github.com/aws/aws-sdk-cpp/archive/1.5.8.tar.gz",
             "https://github.com/aws/aws-sdk-cpp/archive/1.5.8.tar.gz",
         ],
-        build_file = clean_dep("//third_party:aws.BUILD"),
     )
 
     java_import_external(
