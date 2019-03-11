@@ -28,6 +28,7 @@ limitations under the License.
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/tracing.h"
 #include "tensorflow/core/platform/types.h"
+#include "tensorflow/core/util/util.h"
 
 namespace tensorflow {
 
@@ -59,21 +60,22 @@ int32 NumInterOpThreadsFromSessionOptions(const SessionOptions& options) {
   // MKL library executes ops in parallel using OMP threads
   // Set inter_op conservatively to avoid thread oversubscription that could
   // lead to severe perf degradations and OMP resource exhaustion
-  int mkl_intra_op = 1;
-#ifdef _OPENMP
-  mkl_intra_op = omp_get_max_threads();
-#endif  // _OPENMP
-  CHECK_GE(mkl_intra_op, 1);
-  const int32 mkl_inter_op = std::max(
-      (port::NumSchedulableCPUs() + mkl_intra_op - 1) / mkl_intra_op, 2);
-  VLOG(0) << "Creating new thread pool with default inter op setting: "
-          << mkl_inter_op
-          << ". Tune using inter_op_parallelism_threads for best performance.";
-  return mkl_inter_op;
-#else
+  if (!DisableMKL()) {
+    int mkl_intra_op = 1;
+  #ifdef _OPENMP
+    mkl_intra_op = omp_get_max_threads();
+  #endif  // _OPENMP
+    DCHECK_GE(mkl_intra_op, 1);
+    const int32 mkl_inter_op = std::max(
+        (port::NumSchedulableCPUs() + mkl_intra_op - 1) / mkl_intra_op, 2);
+    VLOG(0) << "Creating new thread pool with default inter op setting: "
+            << mkl_inter_op
+            << ". Tune using inter_op_parallelism_threads for best performance.";
+    return mkl_inter_op;
+  }
+#endif  // INTEL_MKL
   // Default to using the number of cores available in the process.
   return port::NumSchedulableCPUs();
-#endif  // INTEL_MKL
 }
 
 thread::ThreadPool* NewThreadPoolFromSessionOptions(
