@@ -12,6 +12,10 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
+
+#include <mutex>
+#include <thread>
+
 #include "tensorflow/core/platform/s3/s3_file_system.h"
 #include "tensorflow/core/lib/io/path.h"
 #include "tensorflow/core/lib/strings/str_util.h"
@@ -227,6 +231,9 @@ class S3RandomAccessFile : public RandomAccessFile {
   std::shared_ptr<Aws::S3::S3Client> s3_client_;
 };
 
+static int tmp_file_index_;
+static std::mutex tmp_file_suffix_lock_;
+
 class S3WritableFile : public WritableFile {
  public:
   S3WritableFile(
@@ -239,7 +246,7 @@ class S3WritableFile : public WritableFile {
         s3_client_(s3_client),
         sync_needed_(true),
         outfile_(Aws::MakeShared<Aws::Utils::TempFile>(
-            kS3FileSystemAllocationTag, "/tmp/s3_filesystem_XXXXXX",
+            kS3FileSystemAllocationTag, GetTmpFileSuffix().c_str(),
             std::ios_base::binary | std::ios_base::trunc | std::ios_base::in |
                 std::ios_base::out)) {}
 
@@ -308,6 +315,19 @@ class S3WritableFile : public WritableFile {
   std::shared_ptr<Aws::Utils::TempFile> outfile_;
   std::shared_ptr<Aws::S3::S3Client> s3_client_;
   std::shared_ptr<Aws::Transfer::TransferManager> transfer_manager_;
+
+  std::string GetTmpFileSuffix() {
+    const int max_tmp_file_index = 1000;
+    int tmp_file_index;
+    {
+      std::lock_guard<std::mutex> lock(tmp_file_suffix_lock_);
+      tmp_file_index = tmp_file_index_;
+      tmp_file_index_ = (tmp_file_index_ + 1) % max_tmp_file_index;
+    }
+    std::ostringstream tmp_file_suffix;
+    tmp_file_suffix << "/tmp/s3_filesystem_XXXXXX" << tmp_file_index << "_";
+    return tmp_file_suffix.str();
+  }
 };
 
 class S3ReadOnlyMemoryRegion : public ReadOnlyMemoryRegion {
