@@ -2455,6 +2455,7 @@ cc_library(
             "platform/**/human_readable_json.cc",
             "platform/abi.cc",
             "platform/protobuf.cc",
+            "platform/retrying_utils.cc"
         ],
     ) + tf_additional_lib_srcs(
         exclude = [
