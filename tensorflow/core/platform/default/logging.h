@@ -336,8 +336,6 @@ T&& CheckNotNull(const char* file, int line, const char* exprtext, T&& t) {
   return std::forward<T>(t);
 }
 
-int64 LogLevelStrToInt(const char* tf_env_var_val);
-
 int64 MinLogLevelFromEnv();
 
 int64 MinVLogLevelFromEnv();
