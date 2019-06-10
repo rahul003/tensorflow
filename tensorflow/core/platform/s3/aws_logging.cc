@@ -97,7 +97,7 @@ Aws::Utils::Logging::LogLevel ParseLogLevelFromEnv() {
     // default logging level of FATAL
     level = 1;
   } else {
-    level = tensorflow::internal::LogLevelStrToInt(aws_sdk_log);
+    level = LogLevelStrToInt(aws_sdk_log);
   }
   switch (level) {
     case 0:
