@@ -245,7 +245,7 @@ class S3WritableFile : public WritableFile {
     std::shared_ptr<Aws::S3::S3Client> s3_client)
       : bucket_(bucket),
         object_(object),
-        transfer_manager(transfer_manager),
+        transfer_manager_(transfer_manager),
         s3_client_(s3_client),
         sync_needed_(true),
         outfile_(Aws::MakeShared<Aws::Utils::TempFile>(

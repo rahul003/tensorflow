@@ -149,7 +149,7 @@ cc_library(
     ],
 )
 
-tf_cc_test(
+cc_test(
     name = "retrying_file_system_test",
     size = "small",
     srcs = ["retrying_file_system_test.cc"],
@@ -162,7 +162,7 @@ tf_cc_test(
     ],
 )
 
-tf_cc_test(
+cc_test(
     name = "retrying_utils_test",
     size = "small",
     srcs = ["retrying_utils_test.cc"],
@@ -252,6 +252,8 @@ filegroup(
             "png.h",
             "stream_executor.*",
             "windows/**/*",
+            "retrying_utils*",
+            "retrying_file_system*",
         ],
     ),
     visibility = ["//tensorflow/core:__pkg__"],
@@ -271,6 +273,8 @@ filegroup(
             "**/cuda.h",
             "**/rocm.h",
             "**/stream_executor.h",
+            "retrying_utils.h",
+            "retrying_file_system.h"
         ],
     ),
     visibility = ["//tensorflow/core:__pkg__"],
@@ -297,6 +301,8 @@ filegroup(
             "cpu_info.cc",
             "platform_strings.cc",
             "protobuf.cc",
+            "retrying_file_system*.cc",
+            "retrying_utils*.cc"
         ],
     ),
     visibility = ["//tensorflow/core:__pkg__"],

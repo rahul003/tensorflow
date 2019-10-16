@@ -89,8 +89,8 @@ cc_library(
         ":google_auth_provider",
         ":http_request",
         ":ram_file_block_cache",
-        "//tensorflow/core:retrying_file_system",
-        "//tensorflow/core:retrying_utils",
+        "//tensorflow/core/platform:retrying_file_system",
+        "//tensorflow/core/platform:retrying_utils",
         ":time_util",
         "//tensorflow/core:framework_headers_lib",
         "//tensorflow/core:lib",
@@ -150,7 +150,7 @@ cc_library(
     deps = [
         ":compute_engine_metadata_client",
         ":oauth_client",
-        "//tensorflow/core:retrying_utils",
+        "//tensorflow/core/platform:retrying_utils",
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
         "@com_google_absl//absl/strings",
@@ -170,7 +170,7 @@ cc_library(
     deps = [
         ":curl_http_request",
         ":http_request",
-        "//tensorflow/core:retrying_utils",
+        "//tensorflow/core/platform:retrying_utils",
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
     ],
