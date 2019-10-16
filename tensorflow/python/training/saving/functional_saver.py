@@ -30,6 +30,7 @@ from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import gen_io_ops
 from tensorflow.python.ops import io_ops
 from tensorflow.python.ops import string_ops
+from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.training.saving import saveable_object
 from tensorflow.python.training.saving import saveable_object_util
 from tensorflow.python.util import nest
@@ -206,9 +207,11 @@ class MultiDeviceSaver(object):
     # prefix directly, instead of any physical pathname.  (On failure and
     # subsequent restore, an outdated and orphaned temporary directory can be
     # safely removed.)
-    sharded_suffix = "_temp_%s/part" % uuid.uuid4().hex
-
     with ops.device("cpu:0"):
+      sharded_suffix = control_flow_ops.cond(
+        string_ops.regex_full_match(file_prefix, '^s3://.*'), 
+          lambda: ".part",
+          lambda: "_temp_%s/part" % uuid.uuid4().hex)
       tmp_checkpoint_prefix = string_ops.string_join(
           [file_prefix, sharded_suffix])
 
