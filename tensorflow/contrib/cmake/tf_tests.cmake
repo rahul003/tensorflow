@@ -456,7 +456,7 @@ if (tensorflow_BUILD_CC_TESTS)
       "${tensorflow_source_dir}/tensorflow/core/platform/cloud/google_auth_provider_test.cc"
       "${tensorflow_source_dir}/tensorflow/core/platform/cloud/http_request_test.cc"
       "${tensorflow_source_dir}/tensorflow/core/platform/cloud/oauth_client_test.cc"
-      "${tensorflow_source_dir}/tensorflow/core/platform/cloud/retrying_file_system_test.cc"
+      "${tensorflow_source_dir}/tensorflow/core/platform/retrying_file_system_test.cc"
       "${tensorflow_source_dir}/tensorflow/core/platform/cloud/time_util_test.cc"
       "${tensorflow_source_dir}/tensorflow/core/platform/hadoop/hadoop_file_system_test.cc"
       "${tensorflow_source_dir}/tensorflow/core/platform/profile_utils/cpu_utils_test.cc"

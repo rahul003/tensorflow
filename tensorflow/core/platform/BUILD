@@ -271,6 +271,60 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "retrying_utils",
+    srcs = [
+        "retrying_utils.cc",
+    ],
+    hdrs = [
+        "retrying_utils.h",
+    ],
+    copts = tf_copts(),
+    deps = [
+        "//tensorflow/core:framework_headers_lib",
+        "//tensorflow/core:lib_internal",
+    ],
+)
+
+cc_library(
+    name = "retrying_file_system",
+    hdrs = [
+        "retrying_file_system.h",
+    ],
+    copts = tf_copts(),
+    deps = [
+        ":retrying_utils",
+        "//tensorflow/core:framework_headers_lib",
+        "//tensorflow/core:lib_internal",
+    ],
+)
+
+cc_test(
+    name = "retrying_file_system_test",
+    size = "small",
+    srcs = ["retrying_file_system_test.cc"],
+    deps = [
+        ":retrying_file_system",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:lib_internal",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+    ],
+)
+
+cc_test(
+    name = "retrying_utils_test",
+    size = "small",
+    srcs = ["retrying_utils_test.cc"],
+    deps = [
+        ":retrying_utils",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:lib_internal",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+    ],
+)
+
 # --------------------------------------------------------------------------
 #     Below libraries are here only to make sure the legacy build rules
 #     in tensorflow/core/BUILD are working!
@@ -352,6 +406,8 @@ filegroup(
             "png.h",
             "stream_executor.*",
             "windows/**/*",
+            "retrying_utils*",
+            "retrying_file_system*",
         ],
     ),
     visibility = ["//tensorflow/core:__pkg__"],
@@ -374,6 +430,8 @@ filegroup(
             "**/cuda.h",
             "**/rocm.h",
             "**/stream_executor.h",
+            "retrying_utils*",
+            "retrying_file_system*",
         ],
     ),
     visibility = ["//tensorflow/core:__pkg__"],
@@ -404,6 +462,8 @@ filegroup(
             "protobuf.cc",
             "stringprintf.cc",
             "str_util.cc",
+            "retrying_utils*",
+            "retrying_file_system*",
         ],
     ),
     visibility = ["//tensorflow/core:__pkg__"],

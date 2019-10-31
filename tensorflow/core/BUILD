@@ -2463,7 +2463,7 @@ cc_library(
             "lib/hash/crc32c_accelerate.cc",
             "lib/gif/**/*",
             "lib/jpeg/**/*",
-            "lib/png/**/*",
+            "lib/png/**/*"
         ],
     ) + [
         "//tensorflow/core/platform:legacy_monitoring_srcs",

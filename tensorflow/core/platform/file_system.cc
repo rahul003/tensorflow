@@ -47,6 +47,11 @@ Status FileSystem::IsDirectory(const string& name) {
   return Status(tensorflow::error::FAILED_PRECONDITION, "Not a directory");
 }
 
+Status FileSystem::NeedsTempLocation(const string& path) {
+  // Default is to use temp location
+  return Status::OK();
+}
+
 void FileSystem::FlushCaches() {}
 
 RandomAccessFile::~RandomAccessFile() {}
