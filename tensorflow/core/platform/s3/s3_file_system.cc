@@ -200,7 +200,7 @@ class S3RandomAccessFile : public RandomAccessFile {
 
   Status Read(uint64 offset, size_t n, StringPiece* result,
               char* scratch) const override {
-    VLOG(1) << "ReadFilefromS3 s3://" << bucket_ << "/" << object_;
+    VLOG(1) << "ReadFilefromS3 s3://" << bucket_ << "/" << object_ << " from " << offset << " for n:" << n;
     Aws::S3::Model::GetObjectRequest getObjectRequest;
     getObjectRequest.WithBucket(bucket_.c_str()).WithKey(object_.c_str());
     string bytes = strings::StrCat("bytes=", offset, "-", offset + n - 1);
@@ -481,6 +481,7 @@ Status S3FileSystem::FileExists(const string& fname) {
 
 Status S3FileSystem::GetChildren(const string& dir,
                                  std::vector<string>* result) {
+  VLOG(1) << "GetChildren for path: " << dir;
   string bucket, prefix;
   TF_RETURN_IF_ERROR(ParseS3Path(dir, false, &bucket, &prefix));
 
@@ -530,7 +531,7 @@ Status S3FileSystem::GetChildren(const string& dir,
 Status S3FileSystem::Stat(const string& fname, FileStatistics* stats) {
   string bucket, object;
   TF_RETURN_IF_ERROR(ParseS3Path(fname, true, &bucket, &object));
-
+  VLOG(1) << "Stat on path: " << fname;
   if (object.empty()) {
     Aws::S3::Model::HeadBucketRequest headBucketRequest;
     headBucketRequest.WithBucket(bucket.c_str());
@@ -593,7 +594,7 @@ Status S3FileSystem::GetMatchingPaths(const string& pattern,
 Status S3FileSystem::DeleteFile(const string& fname) {
   string bucket, object;
   TF_RETURN_IF_ERROR(ParseS3Path(fname, false, &bucket, &object));
-
+  VLOG(1) << "DeleteFile: " << fname;
   Aws::S3::Model::DeleteObjectRequest deleteObjectRequest;
   deleteObjectRequest.WithBucket(bucket.c_str()).WithKey(object.c_str());
 
@@ -609,6 +610,7 @@ Status S3FileSystem::DeleteFile(const string& fname) {
 Status S3FileSystem::CreateDir(const string& dirname) {
   string bucket, object;
   TF_RETURN_IF_ERROR(ParseS3Path(dirname, true, &bucket, &object));
+  VLOG(1) << "CreateDir: " << dirname;
   if (object.empty()) {
     Aws::S3::Model::HeadBucketRequest headBucketRequest;
     headBucketRequest.WithBucket(bucket.c_str());
@@ -651,7 +653,9 @@ Status S3FileSystem::DeleteDir(const string& dirname) {
     auto contents = listObjectsOutcome.GetResult().GetContents();
     if (contents.size() > 1 ||
         (contents.size() == 1 && contents[0].GetKey() != prefix.c_str())) {
-      return errors::FailedPrecondition("Cannot delete a non-empty directory.");
+      // Due to Eventual consistency of S3, list may return the objects even after the deletes above
+      // to retry this operation in such case, the error type has been changed to Errors::Internal
+      return errors::INTERNAL("Cannot delete a non-empty directory.");
     }
     if (contents.size() == 1 && contents[0].GetKey() == prefix.c_str()) {
       string filename = dirname;
