@@ -655,7 +655,7 @@ Status S3FileSystem::DeleteDir(const string& dirname) {
         (contents.size() == 1 && contents[0].GetKey() != prefix.c_str())) {
       // Due to Eventual consistency of S3, list may return the objects even after the deletes above
       // to retry this operation in such case, the error type has been changed to Errors::Internal
-      return errors::INTERNAL("Cannot delete a non-empty directory.");
+      return errors::Internal("Cannot delete a non-empty directory.");
     }
     if (contents.size() == 1 && contents[0].GetKey() == prefix.c_str()) {
       string filename = dirname;
