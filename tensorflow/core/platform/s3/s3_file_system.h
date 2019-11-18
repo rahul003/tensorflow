@@ -88,6 +88,8 @@ class S3FileSystem : public FileSystem {
   std::shared_ptr<Aws::Utils::Threading::PooledThreadExecutor> GetExecutor();
   std::shared_ptr<Aws::Utils::Threading::PooledThreadExecutor> executor_;
 
+  Status S3FileSystem::MultiPartCopy(Aws::String source_path, const Aws::String& target_bucket, const Aws::String& target_key);
+  
   // Lock held when checking for s3_client_ and transfer_manager_ initialization
   mutex initialization_lock_;
 };

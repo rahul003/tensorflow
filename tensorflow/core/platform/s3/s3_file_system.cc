@@ -49,6 +49,8 @@ namespace tensorflow {
 namespace {
 static const char* kS3FileSystemAllocationTag = "S3FileSystemAllocation";
 static const size_t kS3ReadAppendableFileBufferSize = 1024 * 1024;
+// 5 MB chosen similar to default size of AWS CPP SDK's Transfer Manager
+static const size_t kS3MultiPartCopyPartSize = 5 * 1024 * 1024;
 static const int kS3GetChildrenMaxKeys = 100;
 static const int kExecutorPoolSize = 5;
 static const int kUploadRetries = 5;
@@ -675,6 +677,80 @@ Status S3FileSystem::GetFileSize(const string& fname, uint64* file_size) {
   return Status::OK();
 }
 
+Status S3FileSystem::MultiPartCopy(Aws::String source_path, const Aws::String& target_bucket, const Aws::String& target_key) {
+  VLOG(1) << "MultiPartCopy from " << source_path << " to: s3://" << target_bucket <<"/" << target_key;
+
+  Aws::S3::Model::CreateMultipartUploadRequest multipartUploadRequest;
+  multipartUploadRequest.SetBucket(target_bucket);
+  multipartUploadRequest.SetKey(target_key);
+
+  auto multipartUploadOutcome = this->GetS3Client()->CreateMultipartUpload(multipartUploadRequest);
+  if (!multipartUploadOutcome.IsSuccess())
+  {
+    return errors::Unknown(multipartUploadOutcome.GetError().GetExceptionName(), ": ", multipartUploadOutcome.GetError().GetMessage())
+  }
+
+  Aws::String uploadID = multipartUploadOutcome.GetResult().GetUploadId();
+
+  FileStatistics stats;
+  TF_RETURN_IF_ERROR(this->Stat(fname, &stats));
+  int numParts = stats.length / kS3MultiPartCopyPartSize
+
+  Aws::S3::Model::CompletedMultipartUpload completedMPURequest;
+
+  for (int partNumber=0; partNumber<num_parts; partNumber++) {
+    int retryCount = 3;
+    while (retryCount > 0) {
+      retryCount--;
+      
+      uint64 startPos = (partNumber - 1) * kS3MultiPartCopyPartSize;
+      uint64 endPos = startPos + kS3MultiPartCopyPartSize - 1;
+
+      std::ostringstream rangeStream;
+      rangeStream << "bytes=" << startPos << std::to_string(startPos) << "-" << std::to_string(endPos);
+      string range = rangeStream.str();
+
+      Aws::S3::Model::UploadPartCopyRequest uploadPartCopyRequest;
+      uploadPartCopyRequest.SetBucket(target_bucket);
+      uploadPartCopyRequest.SetKey(target_key);
+
+      source_path = Aws::Utils::StringUtils::URLEncode(source_path.c_str());
+
+      uploadPartCopyRequest.SetCopySource(source_path.c_str());
+      uploadPartCopyRequest.SetCopySourceRange(range.c_str());
+      uploadPartCopyRequest.SetPartNumber(partNumber);
+      uploadPartCopyRequest.SetUploadId(uploadID);
+
+      auto uploadPartCopyOutcome = this->GetS3Client()->UploadPartCopy(uploadPartCopyRequest);
+      if (!uploadPartCopyOutcome.IsSuccess() && retryCount > 0) {
+        LOG(INFO) << "Retrying failed copy of part " << std::to_string(partNumber) << " during multi part copy from "
+                  << source_path << " to s3://" << target_bucket << "/" << target_key << " failed.";
+      } else if (!uploadPartCopyOutcome.IsSuccess()) {
+        return errors::Unknown(uploadPartCopyOutcome.GetError().GetExceptionName(), ": ",
+                               uploadPartCopyOutcome.GetError().GetMessage());
+      }
+
+      Aws::String sETag = uploadPartCopyOutcome.GetResult().GetCopyPartResult().GetETag();
+      Aws::S3::Model::CompletedPart completedPart;
+      completedPart.SetPartNumber(iPartNumber);
+      completedPart.SetETag(sETag);
+      completedMPURequest.AddParts(completedPart);
+    }
+    
+    Aws::S3::Model::CompleteMultipartUploadRequest completeRequest;
+    completeRequest.SetBucket(target_bucket);
+    completeRequest.SetKey(target_key);
+    completeRequest.SetUploadId(uploadID);
+    completeRequest.SetMultipartUpload(completedMPURequest);
+    auto completeOutcome = pS3Client->CompleteMultipartUpload(completeRequest);
+    if (!completeOutcome.IsSuccess()) {
+      return errors::Unknown(completeOutcome.GetError().GetExceptionName(), ": ",
+                             completeOutcome.GetError().GetMessage());
+    }
+  }
+  
+}
+
 Status S3FileSystem::RenameFile(const string& src, const string& target) {
   VLOG(1) << "RenameFile from: " << src << " to: " << target;
   string src_bucket, src_object, target_bucket, target_object;
@@ -718,17 +794,12 @@ Status S3FileSystem::RenameFile(const string& src, const string& target) {
       Aws::String source = Aws::String(src_bucket.c_str()) + "/" +
                            Aws::Utils::StringUtils::URLEncode(src_key.c_str());
 
-      copyObjectRequest.SetBucket(target_bucket.c_str());
-      copyObjectRequest.SetKey(target_key);
-      copyObjectRequest.SetCopySource(source);
-
-      auto copyObjectOutcome =
-          this->GetS3Client()->CopyObject(copyObjectRequest);
+      auto copyObjectOutcome = MultiPartCopy(source, Aws::String(target_bucket.c_str()), target_key);
       if (!copyObjectOutcome.IsSuccess()) {
         return errors::Unknown(copyObjectOutcome.GetError().GetExceptionName(),
                                ": ", copyObjectOutcome.GetError().GetMessage());
       }
-
+      
       deleteObjectRequest.SetBucket(src_bucket.c_str());
       deleteObjectRequest.SetKey(src_key.c_str());
 
