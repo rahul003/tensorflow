@@ -40,6 +40,10 @@ limitations under the License.
 #include <aws/s3/model/HeadObjectRequest.h>
 #include <aws/s3/model/ListObjectsRequest.h>
 #include <aws/s3/model/PutObjectRequest.h>
+#include <aws/s3/model/CompleteMultipartUploadRequest.h>
+#include <aws/s3/model/CompletedMultipartUpload.h>
+#include <aws/s3/model/CompletedPart.h>
+#include <aws/s3/model/UploadPartCopyRequest.h>
 #include <aws/transfer/TransferManager.h>
 
 #include <cstdlib>
@@ -49,8 +53,8 @@ namespace tensorflow {
 namespace {
 static const char* kS3FileSystemAllocationTag = "S3FileSystemAllocation";
 static const size_t kS3ReadAppendableFileBufferSize = 1024 * 1024;
-// 5 MB chosen similar to default size of AWS CPP SDK's Transfer Manager
-static const size_t kS3MultiPartCopyPartSize = 5 * 1024 * 1024;
+// 500 MB chosen similar to default size of AWS CPP SDK's Transfer Manager
+static const size_t kS3MultiPartCopyPartSize = 50 * 1024 * 1024;
 static const int kS3GetChildrenMaxKeys = 100;
 static const int kExecutorPoolSize = 5;
 static const int kUploadRetries = 5;
@@ -126,6 +130,7 @@ Aws::Client::ClientConfiguration& GetDefaultClientConfig() {
         cfg.connectTimeoutMs = timeout;
       }
     }
+    // if these timeouts are low, you may see an error Unable to connect to endpoint
     const char* request_timeout = getenv("S3_REQUEST_TIMEOUT_MSEC");
     if (request_timeout) {
       int64 timeout;
@@ -677,8 +682,51 @@ Status S3FileSystem::GetFileSize(const string& fname, uint64* file_size) {
   return Status::OK();
 }
 
-Status S3FileSystem::MultiPartCopy(Aws::String source_path, const Aws::String& target_bucket, const Aws::String& target_key) {
-  VLOG(1) << "MultiPartCopy from " << source_path << " to: s3://" << target_bucket <<"/" << target_key;
+
+void S3FileSystem::MultiPartCopyCallback(const Aws::S3::Model::UploadPartCopyRequest& request,
+                                         const Aws::S3::Model::UploadPartCopyOutcome& uploadPartCopyOutcome,
+                                         const std::shared_ptr<const Aws::Client::AsyncCallerContext>& context) {
+
+  std::shared_ptr<tensorflow::MultiPartCopyAsyncContext> multiPartContext =
+    std::const_pointer_cast<tensorflow::MultiPartCopyAsyncContext>(std::static_pointer_cast<const tensorflow::MultiPartCopyAsyncContext>(context));
+
+  Status status;
+  if (!uploadPartCopyOutcome.IsSuccess()) {
+    LOG(ERROR) << "Error when uploading " << multiPartContext->partNumber << " " << uploadPartCopyOutcome.GetError().GetMessage();
+    status = errors::Unknown(uploadPartCopyOutcome.GetError().GetExceptionName(), ": ",
+                                               uploadPartCopyOutcome.GetError().GetMessage());
+  } else {
+
+  }
+
+  {
+    std::unique_lock <std::mutex> lock(*multiPartContext->multi_part_copy_mutex_);
+    (*multiPartContext->finishedPartStates)[multiPartContext->partNumber] = multiPartContext->incompletePartStates->at(multiPartContext->partNumber);
+
+    if (uploadPartCopyOutcome.IsSuccess()) {
+      // success
+      LOG(WARNING) << "Finished uploading of part " << multiPartContext->partNumber;
+      Aws::String eTag = uploadPartCopyOutcome.GetResult().GetCopyPartResult().GetETag();
+      Aws::S3::Model::CompletedPart completedPart;
+      completedPart.SetPartNumber(multiPartContext->partNumber);
+      completedPart.SetETag(eTag);
+      multiPartContext->completedMPURequest->AddParts(completedPart);
+      status = Status::OK();
+    }
+
+    multiPartContext->finishedPartStates->at(multiPartContext->partNumber).status = status;
+
+    multiPartContext->incompletePartStates->erase(multiPartContext->partNumber);
+    // Notify the thread that started the operation
+    multiPartContext->multi_part_copy_cv_->notify_one();
+  }
+
+}
+
+
+Status S3FileSystem::MultiPartCopy(const string& source_bucket, const string& source_key,
+                                   const Aws::String& target_bucket, const Aws::String& target_key) {
+  VLOG(1) << "MultiPartCopy from " << source_bucket << "/" << source_key <<  " to: "<< target_bucket <<"/" << target_key;
 
   Aws::S3::Model::CreateMultipartUploadRequest multipartUploadRequest;
   multipartUploadRequest.SetBucket(target_bucket);
@@ -687,68 +735,99 @@ Status S3FileSystem::MultiPartCopy(Aws::String source_path, const Aws::String& t
   auto multipartUploadOutcome = this->GetS3Client()->CreateMultipartUpload(multipartUploadRequest);
   if (!multipartUploadOutcome.IsSuccess())
   {
-    return errors::Unknown(multipartUploadOutcome.GetError().GetExceptionName(), ": ", multipartUploadOutcome.GetError().GetMessage())
+    return errors::Unknown(multipartUploadOutcome.GetError().GetExceptionName(),
+                           ": ", multipartUploadOutcome.GetError().GetMessage());
   }
 
   Aws::String uploadID = multipartUploadOutcome.GetResult().GetUploadId();
 
   FileStatistics stats;
-  TF_RETURN_IF_ERROR(this->Stat(fname, &stats));
-  int numParts = stats.length / kS3MultiPartCopyPartSize
+  string source_s3_path = "s3://" + source_bucket + "/" + source_key;
+  TF_RETURN_IF_ERROR(this->Stat(source_s3_path, &stats));
+
+  Aws::String source = Aws::String(source_bucket.c_str()) + "/" +
+                       Aws::Utils::StringUtils::URLEncode(source_key.c_str());
+
+  int numParts = stats.length / kS3MultiPartCopyPartSize;
 
   Aws::S3::Model::CompletedMultipartUpload completedMPURequest;
 
-  for (int partNumber=0; partNumber<num_parts; partNumber++) {
-    int retryCount = 3;
-    while (retryCount > 0) {
-      retryCount--;
-      
-      uint64 startPos = (partNumber - 1) * kS3MultiPartCopyPartSize;
-      uint64 endPos = startPos + kS3MultiPartCopyPartSize - 1;
+  std::map<int, PartState> incompletePartStates;
+  std::map<int, PartState> finishedPartStates;
+  std::mutex multi_part_copy_mutex_;
+  std::condition_variable multi_part_copy_cv_;
 
-      std::ostringstream rangeStream;
-      rangeStream << "bytes=" << startPos << std::to_string(startPos) << "-" << std::to_string(endPos);
-      string range = rangeStream.str();
+  for (int partNumber=1; partNumber<=numParts; partNumber++) {
+    uint64 startPos = (partNumber - 1) * kS3MultiPartCopyPartSize;
+    uint64 endPos = startPos + kS3MultiPartCopyPartSize - 1;
 
-      Aws::S3::Model::UploadPartCopyRequest uploadPartCopyRequest;
-      uploadPartCopyRequest.SetBucket(target_bucket);
-      uploadPartCopyRequest.SetKey(target_key);
+    std::ostringstream rangeStream;
+    rangeStream << "bytes=" << startPos << "-" << std::to_string(endPos);
+    string range = rangeStream.str();
 
-      source_path = Aws::Utils::StringUtils::URLEncode(source_path.c_str());
+    Aws::S3::Model::UploadPartCopyRequest uploadPartCopyRequest;
+    uploadPartCopyRequest.SetBucket(target_bucket);
+    uploadPartCopyRequest.SetKey(target_key);
+    uploadPartCopyRequest.SetCopySource(source.c_str());
+    uploadPartCopyRequest.SetCopySourceRange(range.c_str());
+    uploadPartCopyRequest.SetPartNumber(partNumber);
+    uploadPartCopyRequest.SetUploadId(uploadID);
 
-      uploadPartCopyRequest.SetCopySource(source_path.c_str());
-      uploadPartCopyRequest.SetCopySourceRange(range.c_str());
-      uploadPartCopyRequest.SetPartNumber(partNumber);
-      uploadPartCopyRequest.SetUploadId(uploadID);
+    // Set up AsyncCallerContext. Pass the S3 object name to the callback.
+    auto multiPartContext = Aws::MakeShared<tensorflow::MultiPartCopyAsyncContext>("MultiPartCopyContext");
+//    context->partState = Aws::MakeShared<PartState>("MultiPartCopyContext");
+    PartState ps;
+    ps.partNumber = partNumber;
+    multiPartContext->partNumber = partNumber;
+    multiPartContext->incompletePartStates = &incompletePartStates;
+    multiPartContext->finishedPartStates = &finishedPartStates;
+    multiPartContext->completedMPURequest = &completedMPURequest;
+    multiPartContext->multi_part_copy_mutex_ = &multi_part_copy_mutex_;
+    multiPartContext->multi_part_copy_cv_ = &multi_part_copy_cv_;
 
-      auto uploadPartCopyOutcome = this->GetS3Client()->UploadPartCopy(uploadPartCopyRequest);
-      if (!uploadPartCopyOutcome.IsSuccess() && retryCount > 0) {
-        LOG(INFO) << "Retrying failed copy of part " << std::to_string(partNumber) << " during multi part copy from "
-                  << source_path << " to s3://" << target_bucket << "/" << target_key << " failed.";
-      } else if (!uploadPartCopyOutcome.IsSuccess()) {
-        return errors::Unknown(uploadPartCopyOutcome.GetError().GetExceptionName(), ": ",
-                               uploadPartCopyOutcome.GetError().GetMessage());
-      }
+    incompletePartStates[partNumber] = ps;
 
-      Aws::String sETag = uploadPartCopyOutcome.GetResult().GetCopyPartResult().GetETag();
-      Aws::S3::Model::CompletedPart completedPart;
-      completedPart.SetPartNumber(iPartNumber);
-      completedPart.SetETag(sETag);
-      completedMPURequest.AddParts(completedPart);
-    }
-    
-    Aws::S3::Model::CompleteMultipartUploadRequest completeRequest;
-    completeRequest.SetBucket(target_bucket);
-    completeRequest.SetKey(target_key);
-    completeRequest.SetUploadId(uploadID);
-    completeRequest.SetMultipartUpload(completedMPURequest);
-    auto completeOutcome = pS3Client->CompleteMultipartUpload(completeRequest);
-    if (!completeOutcome.IsSuccess()) {
-      return errors::Unknown(completeOutcome.GetError().GetExceptionName(), ": ",
-                             completeOutcome.GetError().GetMessage());
-    }
+    LOG(INFO) << range << " " << std::to_string(partNumber);
+//
+//    static MultiPartCopyCallback(const Aws::S3::Model::UploadPartCopyRequest& request,
+//                                 const Aws::S3::Model::UploadPartCopyOutcome& uploadPartCopyOutcome,
+//                                 const std::shared_ptr<const Aws::Client::AsyncCallerContext>& context);
+
+
+    auto callback = [this](const Aws::S3::S3Client *client, const Aws::S3::Model::UploadPartCopyRequest &request,
+                           const Aws::S3::Model::UploadPartCopyOutcome &outcome,
+                           const std::shared_ptr<const Aws::Client::AsyncCallerContext> &context) {
+      this->MultiPartCopyCallback(request, outcome, context);
+    };
+
+    this->GetS3Client()->UploadPartCopyAsync(uploadPartCopyRequest,
+                                             callback,
+                                             multiPartContext);
+
   }
-  
+  {
+      std::unique_lock <std::mutex> lock(multi_part_copy_mutex_);
+      //wait on the mutex until notify is called
+      multi_part_copy_cv_.wait(lock, [&finishedPartStates, numParts] {
+        return finishedPartStates.size() == numParts;
+      });
+  }
+
+  for(int partNumber=1; partNumber<=numParts; partNumber++) {
+    TF_RETURN_IF_ERROR(finishedPartStates[partNumber].status);
+  }
+
+  Aws::S3::Model::CompleteMultipartUploadRequest completeRequest;
+  completeRequest.SetBucket(target_bucket);
+  completeRequest.SetKey(target_key);
+  completeRequest.SetUploadId(uploadID);
+  completeRequest.SetMultipartUpload(completedMPURequest);
+  auto completeOutcome = this->GetS3Client()->CompleteMultipartUpload(completeRequest);
+  if (!completeOutcome.IsSuccess()) {
+    return errors::Unknown(completeOutcome.GetError().GetExceptionName(), ": ",
+                           completeOutcome.GetError().GetMessage());
+  }
+  Status::OK();
 }
 
 Status S3FileSystem::RenameFile(const string& src, const string& target) {
@@ -791,15 +870,9 @@ Status S3FileSystem::RenameFile(const string& src, const string& target) {
       Aws::String src_key = object.GetKey();
       Aws::String target_key = src_key;
       target_key.replace(0, src_object.length(), target_object.c_str());
-      Aws::String source = Aws::String(src_bucket.c_str()) + "/" +
-                           Aws::Utils::StringUtils::URLEncode(src_key.c_str());
 
-      auto copyObjectOutcome = MultiPartCopy(source, Aws::String(target_bucket.c_str()), target_key);
-      if (!copyObjectOutcome.IsSuccess()) {
-        return errors::Unknown(copyObjectOutcome.GetError().GetExceptionName(),
-                               ": ", copyObjectOutcome.GetError().GetMessage());
-      }
-      
+      TF_RETURN_IF_ERROR(MultiPartCopy(src_bucket, src_object, Aws::String(target_bucket.c_str()), target_key));
+
       deleteObjectRequest.SetBucket(src_bucket.c_str());
       deleteObjectRequest.SetKey(src_key.c_str());
 

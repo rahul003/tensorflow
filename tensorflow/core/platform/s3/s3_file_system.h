@@ -17,12 +17,33 @@ limitations under the License.
 #define TENSORFLOW_CONTRIB_S3_S3_FILE_SYSTEM_H_
 
 #include <aws/s3/S3Client.h>
+#include <aws/core/utils/StringUtils.h>
+#include <aws/s3/model/CompletedMultipartUpload.h>
 #include <aws/transfer/TransferManager.h>
 #include "tensorflow/core/platform/env.h"
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/retrying_file_system.h"
 
 namespace tensorflow {
+
+
+struct PartState {
+  int partNumber;
+  Status status;
+};
+
+struct MultiPartCopyAsyncContext: public Aws::Client::AsyncCallerContext {
+//  std::shared_ptr<PartState> partState;
+  int partNumber;
+  std::map<int, PartState>* incompletePartStates;
+  std::map<int, PartState>* finishedPartStates;
+  Aws::S3::Model::CompletedMultipartUpload* completedMPURequest;
+
+  // lock and cv for multi part copy
+  std::mutex* multi_part_copy_mutex_;
+  std::condition_variable* multi_part_copy_cv_;
+};
+
 
 class S3FileSystem : public FileSystem {
  public:
@@ -88,10 +109,17 @@ class S3FileSystem : public FileSystem {
   std::shared_ptr<Aws::Utils::Threading::PooledThreadExecutor> GetExecutor();
   std::shared_ptr<Aws::Utils::Threading::PooledThreadExecutor> executor_;
 
-  Status S3FileSystem::MultiPartCopy(Aws::String source_path, const Aws::String& target_bucket, const Aws::String& target_key);
-  
+  Status MultiPartCopy(const string& source_bucket, const string& source_key,
+                       const Aws::String& target_bucket, const Aws::String& target_key);
+
+  void MultiPartCopyCallback(const Aws::S3::Model::UploadPartCopyRequest& request,
+                               const Aws::S3::Model::UploadPartCopyOutcome& uploadPartCopyOutcome,
+                             const std::shared_ptr<const Aws::Client::AsyncCallerContext>& multiPartContext);
+
+
   // Lock held when checking for s3_client_ and transfer_manager_ initialization
   mutex initialization_lock_;
+
 };
 
 /// S3 implementation of a file system with retry on failures.
