@@ -53,8 +53,8 @@ namespace tensorflow {
 namespace {
 static const char* kS3FileSystemAllocationTag = "S3FileSystemAllocation";
 static const size_t kS3ReadAppendableFileBufferSize = 1024 * 1024;
-// 500 MB chosen similar to default size of AWS CPP SDK's Transfer Manager
-static const size_t kS3MultiPartCopyPartSize = 50 * 1024 * 1024;
+// 50 MB chosen
+static const uint64 kS3MultiPartCopyPartSize = 50 * 1024 * 1024;
 static const int kS3GetChildrenMaxKeys = 100;
 static const int kExecutorPoolSize = 5;
 static const int kUploadRetries = 5;
@@ -355,7 +355,17 @@ S3FileSystem::S3FileSystem()
     : s3_client_(nullptr, ShutdownClient),
       initialization_lock_(),
       transfer_manager_(nullptr, ShutdownTransferManager),
-      executor_(nullptr, ShutdownExecutor) {}
+      executor_(nullptr, ShutdownExecutor) {
+
+  const char* part_size_str = getenv("S3_MULTI_PART_COPY_PART_SIZE");
+  multi_part_copy_part_size_ = kS3MultiPartCopyPartSize;
+  if (part_size_str) {
+    uint64 part_size_num;
+    if (strings::safe_strtou64(part_size_str, &part_size_num)) {
+      multi_part_copy_part_size_ = part_size_num;
+    }
+  }
+}
 
 S3FileSystem::~S3FileSystem() {}
 
@@ -690,32 +700,23 @@ void S3FileSystem::MultiPartCopyCallback(const Aws::S3::Model::UploadPartCopyReq
   std::shared_ptr<tensorflow::MultiPartCopyAsyncContext> multiPartContext =
     std::const_pointer_cast<tensorflow::MultiPartCopyAsyncContext>(std::static_pointer_cast<const tensorflow::MultiPartCopyAsyncContext>(context));
 
-  Status status;
-  if (!uploadPartCopyOutcome.IsSuccess()) {
-    LOG(ERROR) << "Error when uploading " << multiPartContext->partNumber << " " << uploadPartCopyOutcome.GetError().GetMessage();
-    status = errors::Unknown(uploadPartCopyOutcome.GetError().GetExceptionName(), ": ",
-                                               uploadPartCopyOutcome.GetError().GetMessage());
-  } else {
-
-  }
-
   {
     std::unique_lock <std::mutex> lock(*multiPartContext->multi_part_copy_mutex_);
-    (*multiPartContext->finishedPartStates)[multiPartContext->partNumber] = multiPartContext->incompletePartStates->at(multiPartContext->partNumber);
 
+    Status status;
     if (uploadPartCopyOutcome.IsSuccess()) {
       // success
-      LOG(WARNING) << "Finished uploading of part " << multiPartContext->partNumber;
       Aws::String eTag = uploadPartCopyOutcome.GetResult().GetCopyPartResult().GetETag();
-      Aws::S3::Model::CompletedPart completedPart;
-      completedPart.SetPartNumber(multiPartContext->partNumber);
-      completedPart.SetETag(eTag);
-      multiPartContext->completedMPURequest->AddParts(completedPart);
+      multiPartContext->eTag = eTag;
       status = Status::OK();
+    } else {
+      LOG(ERROR) << "Error when copying part " << multiPartContext->partNumber << " " << uploadPartCopyOutcome.GetError().GetMessage();
+      status = errors::Unknown(uploadPartCopyOutcome.GetError().GetExceptionName(), ": ",
+                               uploadPartCopyOutcome.GetError().GetMessage());
     }
 
+    (*multiPartContext->finishedPartStates)[multiPartContext->partNumber] = multiPartContext->incompletePartStates->at(multiPartContext->partNumber);
     multiPartContext->finishedPartStates->at(multiPartContext->partNumber).status = status;
-
     multiPartContext->incompletePartStates->erase(multiPartContext->partNumber);
     // Notify the thread that started the operation
     multiPartContext->multi_part_copy_cv_->notify_one();
@@ -741,80 +742,116 @@ Status S3FileSystem::MultiPartCopy(const string& source_bucket, const string& so
 
   Aws::String uploadID = multipartUploadOutcome.GetResult().GetUploadId();
 
-  FileStatistics stats;
+  // Calculate numParts
   string source_s3_path = "s3://" + source_bucket + "/" + source_key;
-  TF_RETURN_IF_ERROR(this->Stat(source_s3_path, &stats));
-
   Aws::String source = Aws::String(source_bucket.c_str()) + "/" +
                        Aws::Utils::StringUtils::URLEncode(source_key.c_str());
-
-  int numParts = stats.length / kS3MultiPartCopyPartSize;
+  uint64 file_length;
+  TF_RETURN_IF_ERROR(this->GetFileSize(source_s3_path, &file_length));
+  int numParts = file_length / multi_part_copy_part_size_;
+  if (numParts > 10000) {
+    std::ostringstream s;
+    s << "MultiPartCopy with number of parts more than 10000 is not supported. Your object "
+      << source_s3_path << " required " << numParts << " as multi_part_copy_part_size is set to "
+      << multi_part_copy_part_size_ << ". You can control this part size using the environment variable "
+    "S3_MULTI_PART_COPY_PART_SIZE to increase it.";
+    return tensorflow::errors::Unimplemented(s.str());
+  }
 
   Aws::S3::Model::CompletedMultipartUpload completedMPURequest;
 
+  // passed to each callback keyed by partNumber
+  std::map<int, std::shared_ptr<tensorflow::MultiPartCopyAsyncContext>> partContexts;
+  // keeps track of incompleteParts keyed by partNumber
   std::map<int, PartState> incompletePartStates;
-  std::map<int, PartState> finishedPartStates;
-  std::mutex multi_part_copy_mutex_;
-  std::condition_variable multi_part_copy_cv_;
-
+  // S3 API partNumber starts from 1
   for (int partNumber=1; partNumber<=numParts; partNumber++) {
-    uint64 startPos = (partNumber - 1) * kS3MultiPartCopyPartSize;
-    uint64 endPos = startPos + kS3MultiPartCopyPartSize - 1;
-
-    std::ostringstream rangeStream;
-    rangeStream << "bytes=" << startPos << "-" << std::to_string(endPos);
-    string range = rangeStream.str();
-
-    Aws::S3::Model::UploadPartCopyRequest uploadPartCopyRequest;
-    uploadPartCopyRequest.SetBucket(target_bucket);
-    uploadPartCopyRequest.SetKey(target_key);
-    uploadPartCopyRequest.SetCopySource(source.c_str());
-    uploadPartCopyRequest.SetCopySourceRange(range.c_str());
-    uploadPartCopyRequest.SetPartNumber(partNumber);
-    uploadPartCopyRequest.SetUploadId(uploadID);
-
-    // Set up AsyncCallerContext. Pass the S3 object name to the callback.
-    auto multiPartContext = Aws::MakeShared<tensorflow::MultiPartCopyAsyncContext>("MultiPartCopyContext");
-//    context->partState = Aws::MakeShared<PartState>("MultiPartCopyContext");
     PartState ps;
     ps.partNumber = partNumber;
-    multiPartContext->partNumber = partNumber;
-    multiPartContext->incompletePartStates = &incompletePartStates;
-    multiPartContext->finishedPartStates = &finishedPartStates;
-    multiPartContext->completedMPURequest = &completedMPURequest;
-    multiPartContext->multi_part_copy_mutex_ = &multi_part_copy_mutex_;
-    multiPartContext->multi_part_copy_cv_ = &multi_part_copy_cv_;
-
     incompletePartStates[partNumber] = ps;
-
-    LOG(INFO) << range << " " << std::to_string(partNumber);
-//
-//    static MultiPartCopyCallback(const Aws::S3::Model::UploadPartCopyRequest& request,
-//                                 const Aws::S3::Model::UploadPartCopyOutcome& uploadPartCopyOutcome,
-//                                 const std::shared_ptr<const Aws::Client::AsyncCallerContext>& context);
-
-
-    auto callback = [this](const Aws::S3::S3Client *client, const Aws::S3::Model::UploadPartCopyRequest &request,
-                           const Aws::S3::Model::UploadPartCopyOutcome &outcome,
-                           const std::shared_ptr<const Aws::Client::AsyncCallerContext> &context) {
-      this->MultiPartCopyCallback(request, outcome, context);
-    };
-
-    this->GetS3Client()->UploadPartCopyAsync(uploadPartCopyRequest,
-                                             callback,
-                                             multiPartContext);
-
   }
-  {
+
+  // keeps track of completed parts keyed by partNumber
+  std::map<int, PartState> finishedPartStates;
+  // mutex which protects access of the partStates map
+  std::mutex multi_part_copy_mutex_;
+  // condition variable to be used with above mutex for synchronization
+  std::condition_variable multi_part_copy_cv_;
+
+  int retry_count_ = 3;
+  while (retry_count_-- > 0) {
+    // queue up parts
+    for (std::map<int, PartState>::iterator it = incompletePartStates.begin(); it!=incompletePartStates.end(); it++) {
+      int partNumber = it->first;
+      uint64 startPos = (partNumber - 1) * multi_part_copy_part_size_;
+      uint64 endPos = startPos + kS3MultiPartCopyPartSize - 1;
+
+      std::ostringstream rangeStream;
+      rangeStream << "bytes=" << startPos << "-" << std::to_string(endPos);
+      string range = rangeStream.str();
+
+      Aws::S3::Model::UploadPartCopyRequest uploadPartCopyRequest;
+      uploadPartCopyRequest.SetBucket(target_bucket);
+      uploadPartCopyRequest.SetKey(target_key);
+      uploadPartCopyRequest.SetCopySource(source.c_str());
+      uploadPartCopyRequest.SetCopySourceRange(range.c_str());
+      uploadPartCopyRequest.SetPartNumber(partNumber);
+      uploadPartCopyRequest.SetUploadId(uploadID);
+
+      auto multiPartContext = Aws::MakeShared<tensorflow::MultiPartCopyAsyncContext>("MultiPartCopyContext");
+
+      multiPartContext->partNumber = partNumber;
+      multiPartContext->incompletePartStates = &incompletePartStates;
+      multiPartContext->finishedPartStates = &finishedPartStates;
+      multiPartContext->multi_part_copy_mutex_ = &multi_part_copy_mutex_;
+      multiPartContext->multi_part_copy_cv_ = &multi_part_copy_cv_;
+
+      // replace with current context
+      partContexts[partNumber] = multiPartContext;
+
+      auto callback = [this](const Aws::S3::S3Client *client, const Aws::S3::Model::UploadPartCopyRequest &request,
+                             const Aws::S3::Model::UploadPartCopyOutcome &outcome,
+                             const std::shared_ptr<const Aws::Client::AsyncCallerContext> &context) {
+        this->MultiPartCopyCallback(request, outcome, context);
+      };
+
+      this->GetS3Client()->UploadPartCopyAsync(uploadPartCopyRequest, callback, multiPartContext);
+    }
+    // wait till they finish
+    {
       std::unique_lock <std::mutex> lock(multi_part_copy_mutex_);
-      //wait on the mutex until notify is called
+      // wait on the mutex until notify is called
+      // then check the finished parts as there could be false notifies
       multi_part_copy_cv_.wait(lock, [&finishedPartStates, numParts] {
         return finishedPartStates.size() == numParts;
       });
+    }
+    for(int partNumber=1; partNumber<=numParts; partNumber++) {
+      if (finishedPartStates[partNumber].status != Status::OK()) {
+
+        if (retry_count_ <= 0) {
+          TF_RETURN_IF_ERROR(finishedPartStates[partNumber].status);
+        } else {
+          // retry part
+          PartState ps;
+          ps.partNumber = partNumber;
+          incompletePartStates[partNumber] = ps;
+          finishedPartStates.erase(partNumber);
+        }
+      }
+    }
   }
 
+  // check if there was any error for any part
+  // also set the eTag of completed Part to the final CompletedMPURequest
+  // not these parts have to be added in order
   for(int partNumber=1; partNumber<=numParts; partNumber++) {
     TF_RETURN_IF_ERROR(finishedPartStates[partNumber].status);
+
+    Aws::S3::Model::CompletedPart completedPart;
+    completedPart.SetPartNumber(partNumber);
+    completedPart.SetETag(partContexts[partNumber]->eTag);
+    completedMPURequest.AddParts(completedPart);
   }
 
   Aws::S3::Model::CompleteMultipartUploadRequest completeRequest;
@@ -827,7 +864,7 @@ Status S3FileSystem::MultiPartCopy(const string& source_bucket, const string& so
     return errors::Unknown(completeOutcome.GetError().GetExceptionName(), ": ",
                            completeOutcome.GetError().GetMessage());
   }
-  Status::OK();
+  return Status::OK();
 }
 
 Status S3FileSystem::RenameFile(const string& src, const string& target) {

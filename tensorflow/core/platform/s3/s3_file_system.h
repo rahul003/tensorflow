@@ -37,7 +37,7 @@ struct MultiPartCopyAsyncContext: public Aws::Client::AsyncCallerContext {
   int partNumber;
   std::map<int, PartState>* incompletePartStates;
   std::map<int, PartState>* finishedPartStates;
-  Aws::S3::Model::CompletedMultipartUpload* completedMPURequest;
+  Aws::String eTag;
 
   // lock and cv for multi part copy
   std::mutex* multi_part_copy_mutex_;
@@ -119,6 +119,8 @@ class S3FileSystem : public FileSystem {
 
   // Lock held when checking for s3_client_ and transfer_manager_ initialization
   mutex initialization_lock_;
+
+  uint64 multi_part_copy_part_size_;
 
 };
 
