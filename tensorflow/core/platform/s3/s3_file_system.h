@@ -40,8 +40,8 @@ struct MultiPartCopyAsyncContext: public Aws::Client::AsyncCallerContext {
   Aws::String eTag;
 
   // lock and cv for multi part copy
-  std::mutex* multi_part_copy_mutex_;
-  std::condition_variable* multi_part_copy_cv_;
+  std::mutex* multi_part_copy_mutex;
+  std::condition_variable* multi_part_copy_cv;
 };
 
 
@@ -111,9 +111,11 @@ class S3FileSystem : public FileSystem {
 
   Status MultiPartCopy(const string& source_bucket, const string& source_key,
                        const Aws::String& target_bucket, const Aws::String& target_key);
-
+  Status AbortMultiPartCopy(Aws::String target_bucket, Aws::String target_key, Aws::String uploadID);
+  Status CompleteMultiPartCopy(Aws::String target_bucket, Aws::String target_key, Aws::String uploadId,
+                               Aws::S3::Model::CompletedMultipartUpload completedMPURequest);
   void MultiPartCopyCallback(const Aws::S3::Model::UploadPartCopyRequest& request,
-                               const Aws::S3::Model::UploadPartCopyOutcome& uploadPartCopyOutcome,
+                             const Aws::S3::Model::UploadPartCopyOutcome& uploadPartCopyOutcome,
                              const std::shared_ptr<const Aws::Client::AsyncCallerContext>& multiPartContext);
 
 
