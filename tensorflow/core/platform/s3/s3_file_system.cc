@@ -15,6 +15,7 @@ limitations under the License.
 
 #include <mutex>
 #include <thread>
+#include <cmath>
 
 #include "tensorflow/core/platform/s3/s3_file_system.h"
 #include "tensorflow/core/lib/io/path.h"
@@ -41,6 +42,7 @@ limitations under the License.
 #include <aws/s3/model/ListObjectsRequest.h>
 #include <aws/s3/model/PutObjectRequest.h>
 #include <aws/s3/model/CompleteMultipartUploadRequest.h>
+#include <aws/s3/model/AbortMultipartUploadRequest.h>
 #include <aws/s3/model/CompletedMultipartUpload.h>
 #include <aws/s3/model/CompletedPart.h>
 #include <aws/s3/model/UploadPartCopyRequest.h>
@@ -701,7 +703,7 @@ void S3FileSystem::MultiPartCopyCallback(const Aws::S3::Model::UploadPartCopyReq
     std::const_pointer_cast<tensorflow::MultiPartCopyAsyncContext>(std::static_pointer_cast<const tensorflow::MultiPartCopyAsyncContext>(context));
 
   {
-    std::unique_lock <std::mutex> lock(*multiPartContext->multi_part_copy_mutex_);
+    std::unique_lock <std::mutex> lock(*multiPartContext->multi_part_copy_mutex);
 
     Status status;
     if (uploadPartCopyOutcome.IsSuccess()) {
@@ -719,7 +721,7 @@ void S3FileSystem::MultiPartCopyCallback(const Aws::S3::Model::UploadPartCopyReq
     multiPartContext->finishedPartStates->at(multiPartContext->partNumber).status = status;
     multiPartContext->incompletePartStates->erase(multiPartContext->partNumber);
     // Notify the thread that started the operation
-    multiPartContext->multi_part_copy_cv_->notify_one();
+    multiPartContext->multi_part_copy_cv->notify_one();
   }
 
 }
@@ -748,7 +750,7 @@ Status S3FileSystem::MultiPartCopy(const string& source_bucket, const string& so
                        Aws::Utils::StringUtils::URLEncode(source_key.c_str());
   uint64 file_length;
   TF_RETURN_IF_ERROR(this->GetFileSize(source_s3_path, &file_length));
-  int numParts = file_length / multi_part_copy_part_size_;
+  int numParts = ceil((float) file_length / multi_part_copy_part_size_);
   if (numParts > 10000) {
     std::ostringstream s;
     s << "MultiPartCopy with number of parts more than 10000 is not supported. Your object "
@@ -757,6 +759,8 @@ Status S3FileSystem::MultiPartCopy(const string& source_bucket, const string& so
     "S3_MULTI_PART_COPY_PART_SIZE to increase it.";
     return tensorflow::errors::Unimplemented(s.str());
   }
+  VLOG(1) << "Copying from " << source_bucket << "/" << source_key <<  " in " << numParts
+          << " parts of size " << multi_part_copy_part_size_ << " each";
 
   Aws::S3::Model::CompletedMultipartUpload completedMPURequest;
 
@@ -774,9 +778,9 @@ Status S3FileSystem::MultiPartCopy(const string& source_bucket, const string& so
   // keeps track of completed parts keyed by partNumber
   std::map<int, PartState> finishedPartStates;
   // mutex which protects access of the partStates map
-  std::mutex multi_part_copy_mutex_;
+  std::mutex multi_part_copy_mutex;
   // condition variable to be used with above mutex for synchronization
-  std::condition_variable multi_part_copy_cv_;
+  std::condition_variable multi_part_copy_cv;
 
   int retry_count_ = 3;
   while (retry_count_-- > 0) {
@@ -785,6 +789,9 @@ Status S3FileSystem::MultiPartCopy(const string& source_bucket, const string& so
       int partNumber = it->first;
       uint64 startPos = (partNumber - 1) * multi_part_copy_part_size_;
       uint64 endPos = startPos + kS3MultiPartCopyPartSize - 1;
+      if (endPos >= file_length) {
+        endPos = file_length - 1;
+      }
 
       std::ostringstream rangeStream;
       rangeStream << "bytes=" << startPos << "-" << std::to_string(endPos);
@@ -803,8 +810,8 @@ Status S3FileSystem::MultiPartCopy(const string& source_bucket, const string& so
       multiPartContext->partNumber = partNumber;
       multiPartContext->incompletePartStates = &incompletePartStates;
       multiPartContext->finishedPartStates = &finishedPartStates;
-      multiPartContext->multi_part_copy_mutex_ = &multi_part_copy_mutex_;
-      multiPartContext->multi_part_copy_cv_ = &multi_part_copy_cv_;
+      multiPartContext->multi_part_copy_mutex = &multi_part_copy_mutex;
+      multiPartContext->multi_part_copy_cv = &multi_part_copy_cv;
 
       // replace with current context
       partContexts[partNumber] = multiPartContext;
@@ -819,41 +826,67 @@ Status S3FileSystem::MultiPartCopy(const string& source_bucket, const string& so
     }
     // wait till they finish
     {
-      std::unique_lock <std::mutex> lock(multi_part_copy_mutex_);
+      std::unique_lock <std::mutex> lock(multi_part_copy_mutex);
       // wait on the mutex until notify is called
-      // then check the finished parts as there could be false notifies
-      multi_part_copy_cv_.wait(lock, [&finishedPartStates, numParts] {
+      // then check the finished parts as there could be false notifications
+      multi_part_copy_cv.wait(lock, [&finishedPartStates, numParts] {
         return finishedPartStates.size() == numParts;
       });
     }
-    for(int partNumber=1; partNumber<=numParts; partNumber++) {
+    // check if there was any error for any part
+    for (int partNumber=1; partNumber<=numParts; partNumber++) {
       if (finishedPartStates[partNumber].status != Status::OK()) {
-
         if (retry_count_ <= 0) {
-          TF_RETURN_IF_ERROR(finishedPartStates[partNumber].status);
+          if (finishedPartStates[partNumber].status != Status::OK()) {
+            TF_RETURN_IF_ERROR(AbortMultiPartCopy(target_bucket, target_key, uploadID));
+            return finishedPartStates[partNumber].status;
+          }
         } else {
           // retry part
+          LOG(ERROR) << "Retrying failed copy of part " << partNumber << " due to an error with S3. ";
           PartState ps;
           ps.partNumber = partNumber;
           incompletePartStates[partNumber] = ps;
           finishedPartStates.erase(partNumber);
+
         }
       }
     }
   }
 
-  // check if there was any error for any part
-  // also set the eTag of completed Part to the final CompletedMPURequest
-  // not these parts have to be added in order
-  for(int partNumber=1; partNumber<=numParts; partNumber++) {
-    TF_RETURN_IF_ERROR(finishedPartStates[partNumber].status);
-
+  // if there was an error still in any part, it would abort and return in the above loop
+  // set the eTag of completed Part to the final CompletedMPURequest
+  // note these parts have to be added in order
+  for (int partNumber=1; partNumber<=numParts; partNumber++) {
     Aws::S3::Model::CompletedPart completedPart;
     completedPart.SetPartNumber(partNumber);
     completedPart.SetETag(partContexts[partNumber]->eTag);
     completedMPURequest.AddParts(completedPart);
   }
 
+  Status finalStatus = CompleteMultiPartCopy(target_bucket, target_key, uploadID, completedMPURequest);
+  if (finalStatus != Status::OK()) {
+    TF_RETURN_IF_ERROR(AbortMultiPartCopy(target_bucket, target_key, uploadID));
+  }
+  return finalStatus;
+}
+
+
+Status S3FileSystem::AbortMultiPartCopy(Aws::String target_bucket, Aws::String target_key, Aws::String uploadID) {
+  Aws::S3::Model::AbortMultipartUploadRequest abortRequest;
+  abortRequest.WithBucket(target_bucket).WithKey(target_key).WithUploadId(uploadID);
+  auto abortOutcome = this->GetS3Client()->AbortMultipartUpload(abortRequest);
+  if (!abortOutcome.IsSuccess()) {
+    return errors::Unknown(abortOutcome.GetError().GetExceptionName(), ": ", abortOutcome.GetError().GetMessage());
+  }
+  return Status::OK();
+}
+
+
+Status S3FileSystem::CompleteMultiPartCopy(Aws::String target_bucket,
+                                           Aws::String target_key,
+                                           Aws::String uploadID,
+                                           Aws::S3::Model::CompletedMultipartUpload completedMPURequest) {
   Aws::S3::Model::CompleteMultipartUploadRequest completeRequest;
   completeRequest.SetBucket(target_bucket);
   completeRequest.SetKey(target_key);
@@ -866,6 +899,7 @@ Status S3FileSystem::MultiPartCopy(const string& source_bucket, const string& so
   }
   return Status::OK();
 }
+
 
 Status S3FileSystem::RenameFile(const string& src, const string& target) {
   VLOG(1) << "RenameFile from: " << src << " to: " << target;
