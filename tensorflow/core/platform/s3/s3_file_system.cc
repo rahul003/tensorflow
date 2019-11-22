@@ -848,6 +848,7 @@ Status S3FileSystem::MultiPartCopy(const string& source_bucket, const string& so
           ps.partNumber = partNumber;
           incompletePartStates[partNumber] = ps;
           finishedPartStates.erase(partNumber);
+
         }
       }
     }
