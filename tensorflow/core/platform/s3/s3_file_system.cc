@@ -563,7 +563,9 @@ Status S3FileSystem::DeleteDir(const string& dirname) {
     auto contents = listObjectsOutcome.GetResult().GetContents();
     if (contents.size() > 1 ||
         (contents.size() == 1 && contents[0].GetKey() != prefix.c_str())) {
-      return errors::FailedPrecondition("Cannot delete a non-empty directory.");
+      return errors::Unknown("Cannot delete a non-empty directory. "
+                             "This operation will be retried in case this "
+                             "is due to S3's eventual consistency.");
     }
     if (contents.size() == 1 && contents[0].GetKey() == prefix.c_str()) {
       string filename = dirname;

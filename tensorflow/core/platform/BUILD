@@ -783,6 +783,7 @@ cc_test(
        "//tensorflow/core:lib_internal",
        "//tensorflow/core:test",
        "//tensorflow/core:test_main",
+       "//tensorflow/core/platform:str_util",
    ],
 )
 
@@ -796,6 +797,7 @@ cc_test(
        "//tensorflow/core:lib_internal",
        "//tensorflow/core:test",
        "//tensorflow/core:test_main",
+       "//tensorflow/core/platform:str_util",
    ],
 )
 
