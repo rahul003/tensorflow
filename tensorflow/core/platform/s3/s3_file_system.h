@@ -80,6 +80,19 @@ class S3FileSystem : public FileSystem {
   mutex client_lock_;
 };
 
+/// S3 implementation of a file system with retry on failures.
+class RetryingS3FileSystem : public RetryingFileSystem<S3FileSystem> {
+public:
+  RetryingS3FileSystem()
+  : RetryingFileSystem(
+  std::unique_ptr<S3FileSystem>(new S3FileSystem),
+  RetryConfig(
+    100000 /* init_delay_time_us */,
+    32000000 /* max_delay_time_us */,
+    10 /* max_retries */)
+  ) {}
+};
+
 }  // namespace tensorflow
 
 #endif  // TENSORFLOW_CONTRIB_S3_S3_FILE_SYSTEM_H_
