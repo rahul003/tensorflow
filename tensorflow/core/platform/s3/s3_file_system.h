@@ -19,6 +19,7 @@ limitations under the License.
 #include <aws/s3/S3Client.h>
 #include "tensorflow/core/platform/env.h"
 #include "tensorflow/core/platform/mutex.h"
+#include "tensorflow/core/platform/retrying_file_system.h"
 
 namespace tensorflow {
 
@@ -80,18 +81,19 @@ class S3FileSystem : public FileSystem {
   mutex client_lock_;
 };
 
+
 /// S3 implementation of a file system with retry on failures.
 class RetryingS3FileSystem : public RetryingFileSystem<S3FileSystem> {
 public:
   RetryingS3FileSystem()
-  : RetryingFileSystem(
-  std::unique_ptr<S3FileSystem>(new S3FileSystem),
-  RetryConfig(
-    100000 /* init_delay_time_us */,
-    32000000 /* max_delay_time_us */,
-    10 /* max_retries */)
-  ) {}
+  : RetryingFileSystem(std::unique_ptr<S3FileSystem>(new S3FileSystem),
+                       RetryConfig(
+                       100000 /* init_delay_time_us */,
+                       32000000 /* max_delay_time_us */,
+                       10 /* max_retries */
+                       )) {}
 };
+
 
 }  // namespace tensorflow
 
