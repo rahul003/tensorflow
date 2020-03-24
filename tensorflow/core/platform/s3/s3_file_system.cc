@@ -20,6 +20,7 @@ limitations under the License.
 #include <aws/core/utils/StringUtils.h>
 #include <aws/core/utils/logging/AWSLogging.h>
 #include <aws/core/utils/logging/LogSystemInterface.h>
+#include <aws/core/utils/stream/PreallocatedStreamBuf.h>
 #include <aws/s3/S3Client.h>
 #include <aws/s3/S3Errors.h>
 #include <aws/s3/model/AbortMultipartUploadRequest.h>
@@ -53,7 +54,11 @@ static const size_t kS3ReadAppendableFileBufferSize = 1024 * 1024;
 static const int64 kS3TimeoutMsec = 300000;                       // 5 min
 static const uint64 kS3MultiPartCopyPartSize = 50 * 1024 * 1024;  // 50MB
 static const int kS3GetChildrenMaxKeys = 100;
-static const int kExecutorPoolSize = 5;
+
+// With this change multiple threads are used in one single download.
+// Increasing the thread pool size since multiple downloads
+// and uploads can occur in parallel.
+static const int kExecutorPoolSize = 25;
 static const int kUploadRetries = 5;
 static const char* kExecutorTag = "TransferManagerExecutor";
 
@@ -228,6 +233,65 @@ class S3RandomAccessFile : public RandomAccessFile {
               char* scratch) const override {
     VLOG(1) << "ReadFilefromS3 s3://" << bucket_ << "/" << object_ << " from "
             << offset << " for n:" << n;
+// ChunkedTransferManager performance depends on the buffer size used by
+         // TF APIs. In case of bottlenecks, this is an option to disable it
+         const char* use_x_mgr = getenv("S3_DISABLE_MULTI_PART_DOWNLOAD");
+         if (use_x_mgr) {
+           if (use_x_mgr[0] == '1') {
+             return ReadS3Client(offset, n, result, scratch);
+           }
+         }
+         VLOG(1) << "Use ChunkedTransferManager for s3://" << bucket_ << "/"
+                 << object_ << "Used:" << use_x_mgr;
+         return S3ReadChunkedTransferManager(offset, n, result, scratch);
+}
+
+
+Status S3ReadChunkedTransferManager(uint64 offset, size_t n,
+                                    StringPiece* result,
+                                    char* scratch) const {
+    VLOG(3) << " In S3FileSystem Read Using ChunkedTransferManager - : " << n
+            << "  ";
+    using namespace std::chrono;
+    auto start = high_resolution_clock::now();
+    auto create_stream_fn = [&]() {  // create stream lambda fn
+       return Aws::New<TFS3UnderlyingStream>(
+           "TestTag",
+           Aws::New<Aws::Utils::Stream::PreallocatedStreamBuf>(
+             "TestTag", reinterpret_cast<unsigned char*>(scratch), n));
+    };
+    
+    VLOG(3) << "Created Stream in TransferManager Read. Calling DownloadFile";
+    std::shared_ptr<Aws::Transfer::TransferHandle> handle =
+             tm.get()->DownloadPartFile(bucket_.c_str(), object_.c_str(), offset, n,
+                                        create_stream_fn);
+         handle->WaitUntilFinished();
+         VLOG(3) << "ReadTransferManager DownloadFile Complete";
+         if (handle->GetStatus() != Aws::Transfer::TransferStatus::COMPLETED) {
+           VLOG(1) << "Failed to download using TransferManager"
+                   << handle->GetLastError().GetExceptionName() << " - "
+                   << handle->GetLastError().GetMessage();
+      
+           n = 0;
+           *result = StringPiece(scratch, n);
+           return Status(error::OUT_OF_RANGE, "Read less bytes than requested");
+         }
+      
+         n = handle->GetBytesTotalSize();
+         *result = StringPiece(scratch, handle->GetBytesTransferred());
+         auto stop = high_resolution_clock::now();
+         duration<double> time_taken = duration_cast<duration<double>>(stop - start);
+         VLOG(3) << "Time Taken: ReadFileusingTransferManager s3://" << bucket_
+                 << "/" << object_ << ":" << time_taken.count() << "seconds";
+         return Status::OK();
+       }
+
+Status ReadS3Client(uint64 offset, size_t n, StringPiece* result,
+                           char* scratch) const {
+    VLOG(3) << "ReadFilefromS3 s3://" << bucket_ << "/" << object_;
+      
+    using namespace std::chrono;
+    auto start = high_resolution_clock::now();
     Aws::S3::Model::GetObjectRequest getObjectRequest;
     getObjectRequest.WithBucket(bucket_.c_str()).WithKey(object_.c_str());
     string bytes = strings::StrCat("bytes=", offset, "-", offset + n - 1);
@@ -250,6 +314,10 @@ class S3RandomAccessFile : public RandomAccessFile {
     getObjectOutcome.GetResult().GetBody().read(scratch, n);
 
     *result = StringPiece(scratch, n);
+    auto stop = high_resolution_clock::now();
+    duration<double> time_taken = duration_cast<duration<double>>(stop - start);
+    VLOG(3) << "Time Taken: ReadFilefromS3 s3://" << bucket_ << "/" << object_
+            << ":" << time_taken.count() << "seconds \n";
     return Status::OK();
   }
 
@@ -257,6 +325,9 @@ class S3RandomAccessFile : public RandomAccessFile {
   string bucket_;
   string object_;
   std::shared_ptr<Aws::S3::S3Client> s3_client_;
+  std::shared_ptr<Aws::Transfer::TransferManager> transfer_manager_;
+  std::shared_ptr<Aws::Utils::Threading::PooledThreadExecutor> chunk_tm_thread_pool_executor_;
+  uint64 chunk_buffer_size_;
 };
 
 class S3WritableFile : public WritableFile {
@@ -447,7 +518,7 @@ Status S3FileSystem::NewRandomAccessFile(
     const string& fname, std::unique_ptr<RandomAccessFile>* result) {
   string bucket, object;
   TF_RETURN_IF_ERROR(ParseS3Path(fname, false, &bucket, &object));
-  result->reset(new S3RandomAccessFile(bucket, object, this->GetS3Client()));
+  result->reset(new S3RandomAccessFile(bucket, object, this->GetTransferManager(), this->GetExecutor(), this->GetS3Client()));
   return Status::OK();
 }
 
