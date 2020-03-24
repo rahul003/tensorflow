@@ -262,7 +262,7 @@ class S3RandomAccessFile : public RandomAccessFile {
     VLOG(3) << "Created Stream in TransferManager Read. Calling DownloadFile";
 
     std::shared_ptr<Aws::Transfer::TransferHandle> handle =
-      transfer_manager_.get().get()->DownloadFile(
+      transfer_manager_.get()->DownloadFile(
         bucket_.c_str(), object_.c_str(), offset, n, create_stream_fn);
     handle->WaitUntilFinished();
 
