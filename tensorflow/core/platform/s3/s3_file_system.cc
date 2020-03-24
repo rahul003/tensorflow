@@ -229,7 +229,7 @@ class S3RandomAccessFile : public RandomAccessFile {
         use_multi_part_download_(use_multi_part_download),
         transfer_manager_(transfer_manager),
         s3_client_(s3_client) {}
-
+  
   Status Name(StringPiece* result) const override {
     return errors::Unimplemented("S3RandomAccessFile does not support Name()");
   }
