@@ -550,9 +550,14 @@ Status S3FileSystem::NewRandomAccessFile(
     const string& fname, std::unique_ptr<RandomAccessFile>* result) {
   string bucket, object;
   TF_RETURN_IF_ERROR(ParseS3Path(fname, false, &bucket, &object));
-  result->reset(new S3RandomAccessFile(bucket, object, this->use_multi_part_download_,
-    this->GetTransferManager(), this->GetExecutor(), this->GetS3Client()));
-  return Status::OK(); const bool use_multi_part_download, }
+  result->reset(new S3RandomAccessFile(bucket, object, 
+                                       this->use_multi_part_download_,
+                                       this->GetTransferManager(), 
+                                       this->GetExecutor(), 
+                                       this->GetS3Client())
+  );
+  return Status::OK();
+}
 
 Status S3FileSystem::NewWritableFile(const string& fname,
                                      std::unique_ptr<WritableFile>* result) {
