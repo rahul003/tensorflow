@@ -553,7 +553,6 @@ Status S3FileSystem::NewRandomAccessFile(
   result->reset(new S3RandomAccessFile(bucket, object, 
                                        this->use_multi_part_download_,
                                        this->GetTransferManager(), 
-                                       this->GetExecutor(), 
                                        this->GetS3Client())
   );
   return Status::OK();
