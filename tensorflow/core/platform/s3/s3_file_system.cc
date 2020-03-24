@@ -52,7 +52,7 @@ namespace {
 static const char* kS3FileSystemAllocationTag = "S3FileSystemAllocation";
 static const size_t kS3ReadAppendableFileBufferSize = 1024 * 1024;
 static const int64 kS3TimeoutMsec = 300000;                       // 5 min
-static const uint64 kS3MultiPartCopyPartSize = 50 * 1024 * 1024;  // 50MB
+static const uint64 kS3MultiPartChunkSize = 50 * 1024 * 1024;  // 50MB
 static const int kS3GetChildrenMaxKeys = 100;
 
 // With this change multiple threads are used in one single download.
@@ -221,9 +221,14 @@ static Status CreateStatusFromAwsError(
 
 class S3RandomAccessFile : public RandomAccessFile {
  public:
-  S3RandomAccessFile(const string& bucket, const string& object,
-                     std::shared_ptr<Aws::S3::S3Client> s3_client)
-      : bucket_(bucket), object_(object), s3_client_(s3_client) {}
+  S3RandomAccessFile(const string& bucket, const string& object, 
+    const bool use_multi_part_download, 
+    std::shared_ptr<Aws::Transfer::TransferManager> transfer_manager,
+    std::shared_ptr<Aws::S3::S3Client> s3_client)
+      : bucket_(bucket), object_(object), 
+        use_multi_part_download_(use_multi_part_download),
+        transfer_manager_(transfer_manager),
+        s3_client_(s3_client) {}
 
   Status Name(StringPiece* result) const override {
     return errors::Unimplemented("S3RandomAccessFile does not support Name()");
@@ -233,65 +238,76 @@ class S3RandomAccessFile : public RandomAccessFile {
               char* scratch) const override {
     VLOG(1) << "ReadFilefromS3 s3://" << bucket_ << "/" << object_ << " from "
             << offset << " for n:" << n;
-// ChunkedTransferManager performance depends on the buffer size used by
-         // TF APIs. In case of bottlenecks, this is an option to disable it
-         const char* use_x_mgr = getenv("S3_DISABLE_MULTI_PART_DOWNLOAD");
-         if (use_x_mgr) {
-           if (use_x_mgr[0] == '1') {
-             return ReadS3Client(offset, n, result, scratch);
-           }
-         }
-         VLOG(1) << "Use ChunkedTransferManager for s3://" << bucket_ << "/"
-                 << object_ << "Used:" << use_x_mgr;
-         return S3ReadChunkedTransferManager(offset, n, result, scratch);
-}
+    if (use_multi_part_download_) {
+      return ReadS3TransferManager(offset, n, result, scratch);
+    } else {
+      return ReadS3Client(offset, n, result, scratch);
+    }
+  }
 
-
-Status S3ReadChunkedTransferManager(uint64 offset, size_t n,
-                                    StringPiece* result,
-                                    char* scratch) const {
-    VLOG(3) << " In S3FileSystem Read Using ChunkedTransferManager - : " << n
-            << "  ";
+  Status ReadS3TransferManager(uint64 offset, size_t n, StringPiece* result,
+                               char* scratch) const {
+    VLOG(3) << "Using TransferManager";
+    
     using namespace std::chrono;
     auto start = high_resolution_clock::now();
+    
     auto create_stream_fn = [&]() {  // create stream lambda fn
        return Aws::New<TFS3UnderlyingStream>(
-           "TestTag",
+           "S3ReadStream",
            Aws::New<Aws::Utils::Stream::PreallocatedStreamBuf>(
-             "TestTag", reinterpret_cast<unsigned char*>(scratch), n));
+             "S3ReadStream", reinterpret_cast<unsigned char*>(scratch), n));
     };
     
     VLOG(3) << "Created Stream in TransferManager Read. Calling DownloadFile";
-    std::shared_ptr<Aws::Transfer::TransferHandle> handle =
-             tm.get()->DownloadPartFile(bucket_.c_str(), object_.c_str(), offset, n,
-                                        create_stream_fn);
-         handle->WaitUntilFinished();
-         VLOG(3) << "ReadTransferManager DownloadFile Complete";
-         if (handle->GetStatus() != Aws::Transfer::TransferStatus::COMPLETED) {
-           VLOG(1) << "Failed to download using TransferManager"
-                   << handle->GetLastError().GetExceptionName() << " - "
-                   << handle->GetLastError().GetMessage();
-      
-           n = 0;
-           *result = StringPiece(scratch, n);
-           return Status(error::OUT_OF_RANGE, "Read less bytes than requested");
-         }
-      
-         n = handle->GetBytesTotalSize();
-         *result = StringPiece(scratch, handle->GetBytesTransferred());
-         auto stop = high_resolution_clock::now();
-         duration<double> time_taken = duration_cast<duration<double>>(stop - start);
-         VLOG(3) << "Time Taken: ReadFileusingTransferManager s3://" << bucket_
-                 << "/" << object_ << ":" << time_taken.count() << "seconds";
-         return Status::OK();
-       }
 
-Status ReadS3Client(uint64 offset, size_t n, StringPiece* result,
-                           char* scratch) const {
-    VLOG(3) << "ReadFilefromS3 s3://" << bucket_ << "/" << object_;
+    std::shared_ptr<Aws::Transfer::TransferHandle> handle =
+      transfer_manager_.get().get()->DownloadFile(
+        bucket_.c_str(), object_.c_str(), offset, n, create_stream_fn);
+    handle->WaitUntilFinished();
+
+    // todo change this
+    int retries = 4;
+
+    while (handle->GetStatus() == Aws::Transfer::TransferStatus::FAILED &&
+           retries++ < kUploadRetries) {
+      // only failed parts will be downloaded again
+      VLOG(1) << "Retrying read of s3://" << bucket_ << "/" << object_
+              << " after failure. Current retry count:" << retries;
+      transfer_manager_.get()->RetryDownload(handle);
+      handle->WaitUntilFinished();
+    }
+
+    if (handle->GetStatus() != Aws::Transfer::TransferStatus::COMPLETED) {
+      auto error = handle->GetLastError();
+      TF_RETURN_IF_ERROR(CheckForbiddenError(error));
+
+      LOG(ERROR) << "Download failed with this error" << error.GetExceptionName() << " " << handle->GetLastError().GetMessage();
+
+      n = 0;
+      *result = StringPiece(scratch, n);
+      return Status(error::OUT_OF_RANGE, "Read less bytes than requested");
+      // return errors::Unknown(error.GetExceptionName(), ": ",
+                             // handle->GetFailedParts().size(), " failed parts. ",
+                             // handle->GetLastError().GetMessage());
+    } else {
+      n = handle->GetBytesTotalSize();
+      *result = StringPiece(scratch, handle->GetBytesTransferred());
+      auto stop = high_resolution_clock::now();
+      duration<double> time_taken = duration_cast<duration<double>>(stop - start);
+      VLOG(3) << "Time Taken: ReadFileusingTransferManager s3://" << bucket_
+              << "/" << object_ << ":" << time_taken.count() << "seconds";
+      return Status::OK();
+    }       
+  }
+
+  Status ReadS3Client(uint64 offset, size_t n, StringPiece* result,
+                      char* scratch) const {
+    VLOG(3) << "ReadFile using S3Client s3://" << bucket_ << "/" << object_;
       
     using namespace std::chrono;
     auto start = high_resolution_clock::now();
+
     Aws::S3::Model::GetObjectRequest getObjectRequest;
     getObjectRequest.WithBucket(bucket_.c_str()).WithKey(object_.c_str());
     string bytes = strings::StrCat("bytes=", offset, "-", offset + n - 1);
@@ -299,6 +315,7 @@ Status ReadS3Client(uint64 offset, size_t n, StringPiece* result,
     getObjectRequest.SetResponseStreamFactory([]() {
       return Aws::New<Aws::StringStream>(kS3FileSystemAllocationTag);
     });
+    
     auto getObjectOutcome = this->s3_client_->GetObject(getObjectRequest);
     if (!getObjectOutcome.IsSuccess()) {
       auto error = getObjectOutcome.GetError();
@@ -326,8 +343,7 @@ Status ReadS3Client(uint64 offset, size_t n, StringPiece* result,
   string object_;
   std::shared_ptr<Aws::S3::S3Client> s3_client_;
   std::shared_ptr<Aws::Transfer::TransferManager> transfer_manager_;
-  std::shared_ptr<Aws::Utils::Threading::PooledThreadExecutor> chunk_tm_thread_pool_executor_;
-  uint64 chunk_buffer_size_;
+  bool use_multi_part_download_;
 };
 
 class S3WritableFile : public WritableFile {
@@ -441,14 +457,30 @@ S3FileSystem::S3FileSystem()
       initialization_lock_(),
       transfer_manager_(nullptr, ShutdownTransferManager),
       executor_(nullptr, ShutdownExecutor) {
-  const char* part_size_str = getenv("S3_MULTI_PART_COPY_PART_SIZE");
-  multi_part_copy_part_size_ = kS3MultiPartCopyPartSize;
+  // Different TensorFlow APIs call the download API with different
+  // buffer size and the download performance depends on that size
+  // Default 1MB chunk size is optimized for download sizes of 16MB.
+  // This environment variable provides an option to change
+  // that value in bytes. For e.g., S3_TM_CHUNK_BUFFER_SIZE = 4 *1024 * 1024
+  // for a 4MB chunk size
+  
+  const char* part_size_str = getenv("S3_MULTI_PART_CHUNK_SIZE");
+  multi_part_chunk_size_ = kS3MultiPartChunkSize;
   if (part_size_str) {
     uint64 part_size_num;
     if (strings::safe_strtou64(part_size_str, &part_size_num)) {
-      multi_part_copy_part_size_ = part_size_num;
+      multi_part_chunk_size_ = part_size_num;
     }
   }
+
+  use_multi_part_download_ = true;
+  const char* use_x_mgr = getenv("S3_DISABLE_MULTI_PART_DOWNLOAD");
+  if (use_x_mgr) {
+   if (use_x_mgr[0] == '1') {
+     use_multi_part_download_ = false;
+   }
+  }
+
 }
 
 S3FileSystem::~S3FileSystem() {}
@@ -495,10 +527,10 @@ S3FileSystem::GetTransferManager() {
     Aws::Transfer::TransferManagerConfiguration config(
         this->GetExecutor().get());
     config.s3Client = s3_client;
-    config.bufferSize = this->multi_part_copy_part_size_;
-    // must be larger than pool size * multi_part_copy_part_size
+    config.bufferSize = this->multi_part_chunk_size_;
+    // must be larger than pool size * multi_part_chunk_size
     config.transferBufferMaxHeapSize =
-        (kExecutorPoolSize + 1) * this->multi_part_copy_part_size_;
+        (kExecutorPoolSize + 1) * this->multi_part_chunk_size_;
     this->transfer_manager_ = Aws::Transfer::TransferManager::Create(config);
   }
   return this->transfer_manager_;
@@ -518,9 +550,9 @@ Status S3FileSystem::NewRandomAccessFile(
     const string& fname, std::unique_ptr<RandomAccessFile>* result) {
   string bucket, object;
   TF_RETURN_IF_ERROR(ParseS3Path(fname, false, &bucket, &object));
-  result->reset(new S3RandomAccessFile(bucket, object, this->GetTransferManager(), this->GetExecutor(), this->GetS3Client()));
-  return Status::OK();
-}
+  result->reset(new S3RandomAccessFile(bucket, object, this->use_multi_part_download_,
+    this->GetTransferManager(), this->GetExecutor(), this->GetS3Client()));
+  return Status::OK(); const bool use_multi_part_download, }
 
 Status S3FileSystem::NewWritableFile(const string& fname,
                                      std::unique_ptr<WritableFile>* result) {
@@ -837,10 +869,10 @@ Status S3FileSystem::CopyFile(const Aws::String& source_bucket,
   TF_RETURN_IF_ERROR(
       this->GetFileSize(string(source_full_path.c_str()), &file_length));
   int num_parts;
-  if (file_length <= multi_part_copy_part_size_) {
+  if (file_length <= multi_part_chunk_size_) {
     num_parts = 1;
   } else {
-    num_parts = ceil((float)file_length / multi_part_copy_part_size_);
+    num_parts = ceil((float)file_length / multi_part_chunk_size_);
   }
 
   if (num_parts == 1) {
@@ -850,7 +882,7 @@ Status S3FileSystem::CopyFile(const Aws::String& source_bucket,
         "MultiPartCopy with number of parts more than 10000 is not supported. "
         "Your object ",
         source, " required ", num_parts,
-        " as multi_part_copy_part_size is set to ", multi_part_copy_part_size_,
+        " as multi_part_copy_part_size is set to ", multi_part_chunk_size_,
         ". You can control this part size using the environment variable ",
         "S3_MULTI_PART_COPY_PART_SIZE to increase it.");
     return tensorflow::errors::Unimplemented(message);
@@ -895,7 +927,7 @@ Status S3FileSystem::MultiPartCopy(const Aws::String& source,
 
   Aws::String uploadID = multipartUploadOutcome.GetResult().GetUploadId();
   VLOG(1) << "Copying from " << source << " in " << num_parts
-          << " parts of size " << multi_part_copy_part_size_ << " each";
+          << " parts of size " << multi_part_chunk_size_ << " each";
   Aws::S3::Model::CompletedMultipartUpload completedMPURequest;
 
   // passed to each callback keyed by partNumber
@@ -923,8 +955,8 @@ Status S3FileSystem::MultiPartCopy(const Aws::String& source,
     for (std::map<int, PartState>::iterator it = incompletePartStates.begin();
          it != incompletePartStates.end(); it++) {
       int partNumber = it->first;
-      uint64 startPos = (partNumber - 1) * multi_part_copy_part_size_;
-      uint64 endPos = startPos + kS3MultiPartCopyPartSize - 1;
+      uint64 startPos = (partNumber - 1) * multi_part_chunk_size_;
+      uint64 endPos = startPos + kS3MultiPartChunkSize - 1;
       if (endPos >= file_length) {
         endPos = file_length - 1;
       }

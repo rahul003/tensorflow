@@ -132,8 +132,11 @@ class S3FileSystem : public FileSystem {
   // Lock held when checking for s3_client_ and transfer_manager_ initialization
   mutex initialization_lock_;
 
-  // size to split objects during multipart copy
-  uint64 multi_part_copy_part_size_;
+  // size to split objects during multipart upload/download/copy
+  uint64 multi_part_chunk_size_;
+
+  bool use_multi_part_download_;
+
 };
 
 /// S3 implementation of a file system with retry on failures.
