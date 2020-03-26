@@ -91,14 +91,11 @@ class S3FileSystemTest : public ::testing::Test {
       TF_RETURN_IF_ERROR(
          reader->Read(offset, buffer_size, &result, buffer.get()));
 
-      VLOG(1) << "ReadAllInChunks: result->size: " << result.size() << " \n";
       if (result.size() != 0) {
         ss.write(result.data(), result.size());
         result_size += result.size();
-        VLOG(1) << "ReadAllInChunks: result_size: " << result_size << " \n";
       }
       if (result_size == file_size) {
-        VLOG(1) << "Finished Reading the file";
         break;
       }
       if (result.size() != buffer_size) {
@@ -116,14 +113,8 @@ class S3FileSystemTest : public ::testing::Test {
                               " bytes");
     }
 
-    VLOG(1) << " Copying file size:" << file_size
-            << " result_size:" << result_size
-            << " ss.str().size()=" << ss.str().size() << "--------------\n";
-
     memcpy((char*)(content->data()), ss.str().data(),
         static_cast<size_t>(file_size));
-
-    VLOG(1) << "Finished Reading the file - Returning";
 
     return Status::OK();
   }
@@ -153,7 +144,6 @@ class S3FileSystemTest : public ::testing::Test {
             << " : " << time_taken.count() << "seconds\n";
 
     if (content_xfer == content_s3client) {
-      VLOG(1) << "ReadLargeFile contents match";
       return Status::OK();
     } else {
       VLOG(1) << "ReadLargeFile contents DO NOT match";
