@@ -52,14 +52,15 @@ namespace {
 static const char* kS3FileSystemAllocationTag = "S3FileSystemAllocation";
 static const size_t kS3ReadAppendableFileBufferSize = 1024 * 1024;
 static const int64 kS3TimeoutMsec = 300000;                       // 5 min
-static const uint64 kS3MultiPartChunkSize = 50 * 1024 * 1024;  // 50MB
+static const uint64 kS3MultiPartChunkSize = 2 * 1024 * 1024;  // 2 MB
 static const int kS3GetChildrenMaxKeys = 100;
 
 // With this change multiple threads are used in one single download.
 // Increasing the thread pool size since multiple downloads
 // and uploads can occur in parallel.
 static const int kExecutorPoolSize = 25;
-static const int kUploadRetries = 5;
+static const int kUploadRetries = 3;
+static const int kDownloadRetries = 3;
 static const char* kExecutorTag = "TransferManagerExecutor";
 
 Aws::Client::ClientConfiguration& GetDefaultClientConfig() {
@@ -249,9 +250,6 @@ class S3RandomAccessFile : public RandomAccessFile {
                                char* scratch) const {
     VLOG(3) << "Using TransferManager";
     
-    using namespace std::chrono;
-    auto start = high_resolution_clock::now();
-    
     auto create_stream_fn = [&]() {  // create stream lambda fn
        return Aws::New<TFS3UnderlyingStream>(
            "S3ReadStream",
@@ -267,10 +265,12 @@ class S3RandomAccessFile : public RandomAccessFile {
     handle->WaitUntilFinished();
 
     // todo change this
-    int retries = 4;
+    int retries = 0;
 
-    while (handle->GetStatus() == Aws::Transfer::TransferStatus::FAILED &&
-           retries++ < kUploadRetries) {
+    while (
+      handle->GetStatus() == Aws::Transfer::TransferStatus::FAILED &&
+      handle->GetLastError().GetResponseCode() != Aws::Http::HttpResponseCode::REQUESTED_RANGE_NOT_SATISFIABLE &&
+      retries++ < kDownloadRetries && ) {
       // only failed parts will be downloaded again
       VLOG(1) << "Retrying read of s3://" << bucket_ << "/" << object_
               << " after failure. Current retry count:" << retries;
@@ -280,23 +280,17 @@ class S3RandomAccessFile : public RandomAccessFile {
 
     if (handle->GetStatus() != Aws::Transfer::TransferStatus::COMPLETED) {
       auto error = handle->GetLastError();
-      TF_RETURN_IF_ERROR(CheckForbiddenError(error));
-
-      LOG(ERROR) << "Download failed with this error" << error.GetExceptionName() << " " << handle->GetLastError().GetMessage();
-
-      n = 0;
-      *result = StringPiece(scratch, n);
-      return Status(error::OUT_OF_RANGE, "Read less bytes than requested");
-      // return errors::Unknown(error.GetExceptionName(), ": ",
-                             // handle->GetFailedParts().size(), " failed parts. ",
-                             // handle->GetLastError().GetMessage());
+      if (error.GetResponseCode() ==
+          Aws::Http::HttpResponseCode::REQUESTED_RANGE_NOT_SATISFIABLE) {
+        // expected when end of file is reached
+        n = 0;
+        *result = StringPiece(scratch, n);
+        return Status(error::OUT_OF_RANGE, "Read less bytes than requested");
+      }
+      return CreateStatusFromAwsError(error);
     } else {
       n = handle->GetBytesTotalSize();
       *result = StringPiece(scratch, handle->GetBytesTransferred());
-      auto stop = high_resolution_clock::now();
-      duration<double> time_taken = duration_cast<duration<double>>(stop - start);
-      VLOG(3) << "Time Taken: ReadFileusingTransferManager s3://" << bucket_
-              << "/" << object_ << ":" << time_taken.count() << "seconds";
       return Status::OK();
     }       
   }
@@ -305,9 +299,6 @@ class S3RandomAccessFile : public RandomAccessFile {
                       char* scratch) const {
     VLOG(3) << "ReadFile using S3Client s3://" << bucket_ << "/" << object_;
       
-    using namespace std::chrono;
-    auto start = high_resolution_clock::now();
-
     Aws::S3::Model::GetObjectRequest getObjectRequest;
     getObjectRequest.WithBucket(bucket_.c_str()).WithKey(object_.c_str());
     string bytes = strings::StrCat("bytes=", offset, "-", offset + n - 1);
@@ -326,16 +317,13 @@ class S3RandomAccessFile : public RandomAccessFile {
         return Status(error::OUT_OF_RANGE, "Read less bytes than requested");
       }
       return CreateStatusFromAwsError(error);
-    }
-    n = getObjectOutcome.GetResult().GetContentLength();
-    getObjectOutcome.GetResult().GetBody().read(scratch, n);
+    } else {
+      n = getObjectOutcome.GetResult().GetContentLength();
+      getObjectOutcome.GetResult().GetBody().read(scratch, n);
 
-    *result = StringPiece(scratch, n);
-    auto stop = high_resolution_clock::now();
-    duration<double> time_taken = duration_cast<duration<double>>(stop - start);
-    VLOG(3) << "Time Taken: ReadFilefromS3 s3://" << bucket_ << "/" << object_
-            << ":" << time_taken.count() << "seconds \n";
-    return Status::OK();
+      *result = StringPiece(scratch, n);
+      return Status::OK();
+    }
   }
 
  private:
