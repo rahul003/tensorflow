@@ -223,13 +223,13 @@ static Status CreateStatusFromAwsError(
 class S3RandomAccessFile : public RandomAccessFile {
  public:
   S3RandomAccessFile(const string& bucket, const string& object, 
-    const bool use_multi_part_download, 
-    std::shared_ptr<Aws::Transfer::TransferManager> transfer_manager,
-    std::shared_ptr<Aws::S3::S3Client> s3_client)
-      : bucket_(bucket), object_(object), 
-        use_multi_part_download_(use_multi_part_download),
-        transfer_manager_(transfer_manager),
-        s3_client_(s3_client) {}
+                     const bool use_multi_part_download, 
+                     std::shared_ptr<Aws::Transfer::TransferManager> transfer_manager,
+                     std::shared_ptr<Aws::S3::S3Client> s3_client)
+                    : bucket_(bucket), object_(object), 
+                      use_multi_part_download_(use_multi_part_download),
+                      transfer_manager_(transfer_manager),
+                      s3_client_(s3_client) {}
   
   Status Name(StringPiece* result) const override {
     return errors::Unimplemented("S3RandomAccessFile does not support Name()");
@@ -257,7 +257,7 @@ class S3RandomAccessFile : public RandomAccessFile {
              "S3ReadStream", reinterpret_cast<unsigned char*>(scratch), n));
     };
     
-    VLOG(3) << "Created Stream in TransferManager Read. Calling DownloadFile";
+    VLOG(3) << "Created stream to read with transferManager";
 
     std::shared_ptr<Aws::Transfer::TransferHandle> handle =
       transfer_manager_.get()->DownloadFile(
@@ -266,7 +266,7 @@ class S3RandomAccessFile : public RandomAccessFile {
 
     // todo change this
     int retries = 0;
-
+    
     while (
       handle->GetStatus() == Aws::Transfer::TransferStatus::FAILED &&
       handle->GetLastError().GetResponseCode() != Aws::Http::HttpResponseCode::REQUESTED_RANGE_NOT_SATISFIABLE && 
@@ -445,13 +445,9 @@ S3FileSystem::S3FileSystem()
       initialization_lock_(),
       transfer_manager_(nullptr, ShutdownTransferManager),
       executor_(nullptr, ShutdownExecutor) {
-  // Different TensorFlow APIs call the download API with different
-  // buffer size and the download performance depends on that size
-  // Default 1MB chunk size is optimized for download sizes of 16MB.
-  // This environment variable provides an option to change
-  // that value in bytes. For e.g., S3_TM_CHUNK_BUFFER_SIZE = 4 *1024 * 1024
-  // for a 4MB chunk size
   
+  // Different TensorFlow APIs call the download API with different
+  // buffer size. Download performance depends on that size and this chunk size.
   const char* part_size_str = getenv("S3_MULTI_PART_CHUNK_SIZE");
   multi_part_chunk_size_ = kS3MultiPartChunkSize;
   if (part_size_str) {
@@ -462,9 +458,9 @@ S3FileSystem::S3FileSystem()
   }
 
   use_multi_part_download_ = true;
-  const char* use_x_mgr = getenv("S3_DISABLE_MULTI_PART_DOWNLOAD");
-  if (use_x_mgr) {
-   if (use_x_mgr[0] == '1') {
+  const char* disable_transfer_mgr = getenv("S3_DISABLE_MULTI_PART_DOWNLOAD");
+  if (disable_transfer_mgr) {
+   if (disable_transfer_mgr[0] == '1') {
      use_multi_part_download_ = false;
    }
   }

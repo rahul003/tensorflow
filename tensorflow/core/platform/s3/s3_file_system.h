@@ -151,16 +151,15 @@ class RetryingS3FileSystem : public RetryingFileSystem<S3FileSystem> {
 };
 
 
- // AWS Streams destroy the buffer (buf) passed, so creating a new
-     // IOStream that retains the buffer so the calling function
-     // can control it's lifecycle
-     class TFS3UnderlyingStream : public Aws::IOStream {
-      public:
-       using Base = Aws::IOStream;
-       TFS3UnderlyingStream(std::streambuf* buf) : Base(buf) {}
-      
-       virtual ~TFS3UnderlyingStream() = default;
-     };
+  // AWS Streams destroy the buffer (buf) passed, so creating a new
+  // IOStream that retains the buffer so the calling function
+  // can control it's lifecycle
+class TFS3UnderlyingStream : public Aws::IOStream {
+  public:
+    using Base = Aws::IOStream;
+    TFS3UnderlyingStream(std::streambuf* buf) : Base(buf) {}
+    virtual ~TFS3UnderlyingStream() = default;
+};
 
 }  // namespace tensorflow
 
