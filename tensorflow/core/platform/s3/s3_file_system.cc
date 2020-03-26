@@ -531,11 +531,15 @@ S3FileSystem::GetExecutor() {
 }
 
 Status S3FileSystem::NewRandomAccessFile(
-    const string& fname, std::unique_ptr<RandomAccessFile>* result) {
+    const string& fname, std::unique_ptr<RandomAccessFile>* result,
+    bool use_multi_part_download=true) {
   string bucket, object;
   TF_RETURN_IF_ERROR(ParseS3Path(fname, false, &bucket, &object));
+
+  // check if an override was defined for this file. used for testing
+  bool use_mpd = this->use_multi_part_download_ && use_multi_part_download;
   result->reset(new S3RandomAccessFile(bucket, object, 
-                                       this->use_multi_part_download_,
+                                       use_mpd,
                                        this->GetTransferManager(), 
                                        this->GetS3Client())
   );

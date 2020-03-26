@@ -62,11 +62,11 @@ class S3FileSystemTest : public ::testing::Test {
     return Status::OK();
   }
 
-  Status ReadAllInChunks(const string& fname, string* content) {
+  Status ReadAllInChunks(const string& fname, string* content, bool use_multi_part_download=true) {
     std::unique_ptr<RandomAccessFile> reader;
 
-    TF_RETURN_IF_ERROR(s3fs.NewRandomAccessFile(fname, &reader));
-
+    TF_RETURN_IF_ERROR(s3fs.NewRandomAccessFile(fname, &reader, use_multi_part_download));
+    
     uint64 file_size = 0;
     TF_RETURN_IF_ERROR(s3fs.GetFileSize(fname, &file_size));
 
@@ -90,7 +90,7 @@ class S3FileSystemTest : public ::testing::Test {
       offset = i * buffer_size;
       TF_RETURN_IF_ERROR(
          reader->Read(offset, buffer_size, &result, buffer.get()));
-      // gtl::string_as_array(content)));
+
       VLOG(1) << "ReadAllInChunks: result->size: " << result.size() << " \n";
       if (result.size() != 0) {
         ss.write(result.data(), result.size());
@@ -134,23 +134,22 @@ class S3FileSystemTest : public ::testing::Test {
     const string fname = TmpDir(large_file_name);
     string content_xfer;
     string content_s3client;
+    
     // Read using Chunked Transfer Manager
-    setenv("S3_DISABLE_MULTI_PART_DOWNLOAD", "0", 1);
     using namespace std::chrono;
     auto start = high_resolution_clock::now();
     Status readXfer = ReadAllInChunks(fname, &content_xfer);
     auto stop = high_resolution_clock::now();
     duration<double> time_taken = duration_cast<duration<double>>(stop - start);
     VLOG(1) << "Time Taken: ReadLargeFile using ChunkedTransferManager:"
-           << " : " << time_taken.count() << "seconds\n";
+            << " : " << time_taken.count() << "seconds\n";
 
     // Read using old S3 API and see if the contents match with TransferManager
-    setenv("S3_DISABLE_MULTI_PART_DOWNLOAD", "1", 1);
     start = high_resolution_clock::now();
-    TF_RETURN_IF_ERROR(ReadAllInChunks(fname, &content_s3client));
+    TF_RETURN_IF_ERROR(ReadAllInChunks(fname, &content_s3client, false));
     stop = high_resolution_clock::now();
-    time_taken = duration_cast<duration<double>>(stop - start);
-    VLOG(1) << "Time Taken: ReadLargeFile using S3Read:"
+    time_taken = duration_cast<duration<double>>(stop - star, use_multi_part_downloadt);
+        VLOG(1) << "Time Taken: ReadLargeFile using S3Read:"
             << " : " << time_taken.count() << "seconds\n";
 
     if (content_xfer == content_s3client) {
