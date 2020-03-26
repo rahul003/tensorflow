@@ -139,7 +139,7 @@ class S3FileSystemTest : public ::testing::Test {
     start = high_resolution_clock::now();
     TF_RETURN_IF_ERROR(ReadAllInChunks(fname, &content_s3client, false));
     stop = high_resolution_clock::now();
-    time_taken = duration_cast<duration<double>>(stop - star, use_multi_part_downloadt);
+    time_taken = duration_cast<duration<double>>(stop - start);
         VLOG(1) << "Time Taken: ReadLargeFile using S3Read:"
             << " : " << time_taken.count() << "seconds\n";
 

@@ -531,8 +531,13 @@ S3FileSystem::GetExecutor() {
 }
 
 Status S3FileSystem::NewRandomAccessFile(
+    const string& fname, std::unique_ptr<RandomAccessFile>* result) {
+  return NewRandomAccessFile(fname, result, true);
+}
+
+Status S3FileSystem::NewRandomAccessFile(
     const string& fname, std::unique_ptr<RandomAccessFile>* result,
-    bool use_multi_part_download=true) {
+    bool use_multi_part_download) {
   string bucket, object;
   TF_RETURN_IF_ERROR(ParseS3Path(fname, false, &bucket, &object));
 
