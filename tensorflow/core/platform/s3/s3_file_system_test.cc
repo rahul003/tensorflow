@@ -78,7 +78,7 @@ class S3FileSystemTest : public ::testing::Test {
      static_cast<size_t>((file_size + buffer_size - 1) / buffer_size),
      static_cast<std::size_t>(1));
     VLOG(1) << "buffersize:" << buffer_size << " file_size:" << file_size
-         << " part_count=" << part_count << "\n";
+         << " part_count=" << part_count;
     std::unique_ptr<char[]> buffer{new char[buffer_size]};
     std::stringstream ss;
 
@@ -102,7 +102,7 @@ class S3FileSystemTest : public ::testing::Test {
         break;
       }
       if (result.size() != buffer_size) {
-        VLOG(1) << "Result size and buffer size did not match\n";
+        VLOG(1) << "Result size and buffer size did not match";
         if (result.empty()) {
           return errors::OutOfRange("eof");
         } else {
@@ -118,7 +118,7 @@ class S3FileSystemTest : public ::testing::Test {
 
     auto stop = high_resolution_clock::now();
     duration<double> time_taken = duration_cast<duration<double>>(stop - start);
-    VLOG(1) << "Time Taken" << " : " << time_taken.count() << "seconds\n";
+    VLOG(1) << "Time Taken" << " : " << time_taken.count() << "seconds";
 
     memcpy((char*)(content->data()), ss.str().data(),
         static_cast<size_t>(file_size));
