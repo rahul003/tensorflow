@@ -50,8 +50,11 @@ class S3FileSystem : public FileSystem {
   ~S3FileSystem();
 
   Status NewRandomAccessFile(
+      const string& fname, std::unique_ptr<RandomAccessFile>* result) override;
+
+  Status NewRandomAccessFile(
       const string& fname, std::unique_ptr<RandomAccessFile>* result,
-      bool use_multi_part_download=true) override;
+      bool use_multi_part_download);
 
   Status NewWritableFile(const string& fname,
                          std::unique_ptr<WritableFile>* result) override;
