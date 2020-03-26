@@ -85,6 +85,9 @@ class S3FileSystemTest : public ::testing::Test {
     int offset = 0;
     int result_size = 0;
 
+    using namespace std::chrono;
+    auto start = high_resolution_clock::now();
+
     for (int i = 0; i < part_count; i++) {
       StringPiece result;
       offset = i * buffer_size;
@@ -113,6 +116,10 @@ class S3FileSystemTest : public ::testing::Test {
                               " bytes");
     }
 
+    auto stop = high_resolution_clock::now();
+    duration<double> time_taken = duration_cast<duration<double>>(stop - start);
+    VLOG(1) << "Time Taken" << " : " << time_taken.count() << "seconds\n";
+
     memcpy((char*)(content->data()), ss.str().data(),
         static_cast<size_t>(file_size));
 
@@ -127,21 +134,12 @@ class S3FileSystemTest : public ::testing::Test {
     string content_s3client;
     
     // Read using Chunked Transfer Manager
-    using namespace std::chrono;
-    auto start = high_resolution_clock::now();
-    Status readXfer = ReadAllInChunks(fname, &content_xfer);
-    auto stop = high_resolution_clock::now();
-    duration<double> time_taken = duration_cast<duration<double>>(stop - start);
-    VLOG(1) << "Time Taken: ReadLargeFile using ChunkedTransferManager:"
-            << " : " << time_taken.count() << "seconds\n";
-
+    VLOG(1) << "Using transfer manager";
+    TF_RETURN_IF_ERROR(ReadAllInChunks(fname, &content_xfer));
+    
+    VLOG(1) << "Without transfer manager";
     // Read using old S3 API and see if the contents match with TransferManager
-    start = high_resolution_clock::now();
     TF_RETURN_IF_ERROR(ReadAllInChunks(fname, &content_s3client, false));
-    stop = high_resolution_clock::now();
-    time_taken = duration_cast<duration<double>>(stop - start);
-        VLOG(1) << "Time Taken: ReadLargeFile using S3Read:"
-            << " : " << time_taken.count() << "seconds\n";
 
     if (content_xfer == content_s3client) {
       return Status::OK();
