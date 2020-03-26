@@ -269,8 +269,8 @@ class S3RandomAccessFile : public RandomAccessFile {
 
     while (
       handle->GetStatus() == Aws::Transfer::TransferStatus::FAILED &&
-      handle->GetLastError().GetResponseCode() != Aws::Http::HttpResponseCode::REQUESTED_RANGE_NOT_SATISFIABLE &&
-      retries++ < kDownloadRetries && ) {
+      handle->GetLastError().GetResponseCode() != Aws::Http::HttpResponseCode::REQUESTED_RANGE_NOT_SATISFIABLE && 
+      retries++ < kDownloadRetries) {
       // only failed parts will be downloaded again
       VLOG(1) << "Retrying read of s3://" << bucket_ << "/" << object_
               << " after failure. Current retry count:" << retries;
