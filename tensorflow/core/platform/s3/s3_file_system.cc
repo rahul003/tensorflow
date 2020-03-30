@@ -52,7 +52,7 @@ namespace {
 static const char* kS3FileSystemAllocationTag = "S3FileSystemAllocation";
 static const size_t kS3ReadAppendableFileBufferSize = 1024 * 1024;
 static const int64 kS3TimeoutMsec = 300000;                       // 5 min
-static const uint64 kS3MultiPartChunkSize = 2 * 1024 * 1024;  // 2 MB
+static const uint64 kS3MultiPartChunkSize = 5 * 1024 * 1024;  // 5 MB
 static const int kS3GetChildrenMaxKeys = 100;
 
 // With this change multiple threads are used in one single download.
