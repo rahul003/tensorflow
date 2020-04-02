@@ -52,7 +52,8 @@ namespace {
 static const char* kS3FileSystemAllocationTag = "S3FileSystemAllocation";
 static const size_t kS3ReadAppendableFileBufferSize = 1024 * 1024;
 static const int64 kS3TimeoutMsec = 300000;                       // 5 min
-static const uint64 kS3MultiPartChunkSize = 5 * 1024 * 1024;  // 5 MB
+static const uint64 kS3MultiPartUploadChunkSize = 50 * 1024 * 1024;  // 50 MB
+static const uint64 kS3MultiPartDownloadChunkSize = 2 * 1024 * 1024;  // 50 MB
 static const int kS3GetChildrenMaxKeys = 100;
 
 // With this change multiple threads are used in one single download.
@@ -446,14 +447,23 @@ S3FileSystem::S3FileSystem()
       transfer_manager_(nullptr, ShutdownTransferManager),
       executor_(nullptr, ShutdownExecutor) {
   
-  // Different TensorFlow APIs call the download API with different
-  // buffer size. Download performance depends on that size and this chunk size.
-  const char* part_size_str = getenv("S3_MULTI_PART_CHUNK_SIZE");
-  multi_part_chunk_size_ = kS3MultiPartChunkSize;
+  const char* part_size_str = getenv("S3_MULTI_PART_UPLOAD_CHUNK_SIZE");
+  multi_part_upload_chunk_size_ = kS3MultiPartUploadChunkSize;
   if (part_size_str) {
     uint64 part_size_num;
     if (strings::safe_strtou64(part_size_str, &part_size_num)) {
-      multi_part_chunk_size_ = part_size_num;
+      multi_part_upload_chunk_size_ = part_size_num;
+    }
+  }
+
+  // Different TensorFlow APIs call the download API with different
+  // buffer size. Download performance depends on that size and this chunk size.
+  part_size_str = getenv("S3_MULTI_PART_DOWNLOAD_CHUNK_SIZE");
+  multi_part_download_chunk_size_ = kS3MultiPartDownloadChunkSize;
+  if (part_size_str) {
+    uint64 part_size_num;
+    if (strings::safe_strtou64(part_size_str, &part_size_num)) {
+      multi_part_download_chunk_size_ = part_size_num;
     }
   }
 
@@ -465,6 +475,7 @@ S3FileSystem::S3FileSystem()
    }
   }
 
+  InitializeTransferManagers()
 }
 
 S3FileSystem::~S3FileSystem() {}
@@ -503,11 +514,39 @@ std::shared_ptr<Aws::S3::S3Client> S3FileSystem::GetS3Client() {
   return this->s3_client_;
 }
 
-std::shared_ptr<Aws::Transfer::TransferManager>
-S3FileSystem::GetTransferManager() {
+void S3FileSystem::InitializeTransferManagers() {
   std::shared_ptr<Aws::S3::S3Client> s3_client = this->GetS3Client();
   std::lock_guard<mutex> lock(this->initialization_lock_);
-  if (this->transfer_manager_.get() == nullptr) {
+
+  Aws::Transfer::TransferManagerConfiguration uploadConfig(
+      this->GetExecutor().get());
+  uploadConfig.s3Client = s3_client;
+  uploadConfig.bufferSize = this->multi_part_upload_chunk_size_;
+  // must be larger than pool size * multi_part_chunk_size
+  uploadConfig.transferBufferMaxHeapSize =
+      (kExecutorPoolSize + 1) * this->multi_part_upload_chunk_size_;
+  this->transfer_managers_.insert(Aws::Transfer::TransferDirection::UPLOAD, 
+    Aws::Transfer::TransferManager::Create(uploadConfig));
+
+  Aws::Transfer::TransferManagerConfiguration downloadConfig(
+      this->GetExecutor().get());
+  downloadConfig.s3Client = s3_client;
+  downloadConfig.bufferSize = this->multi_part_download_chunk_size_;
+  // must be larger than pool size * multi_part_chunk_size
+  downloadConfig.transferBufferMaxHeapSize =
+      (kExecutorPoolSize + 1) * this->multi_part_download_chunk_size_;
+  this->transfer_managers_.insert(Aws::Transfer::TransferDirection::DOWNLOAD, 
+    Aws::Transfer::TransferManager::Create(downloadConfig));
+  
+}
+
+std::shared_ptr<Aws::Transfer::TransferManager>
+S3FileSystem::GetTransferManager(const Aws::Transfer::TransferDirection& direction) {
+  std::shared_ptr<Aws::S3::S3Client> s3_client = this->GetS3Client();
+  std::lock_guard<mutex> lock(this->initialization_lock_);
+  
+  std::shared_ptr<Aws::Transfer::TransferManager> transfer_manager = ;
+  if (transfer_manager.get() == nullptr) {
     Aws::Transfer::TransferManagerConfiguration config(
         this->GetExecutor().get());
     config.s3Client = s3_client;
@@ -543,11 +582,11 @@ Status S3FileSystem::NewRandomAccessFile(
 
   // check if an override was defined for this file. used for testing
   bool use_mpd = this->use_multi_part_download_ && use_multi_part_download;
-  result->reset(new S3RandomAccessFile(bucket, object, 
-                                       use_mpd,
-                                       this->GetTransferManager(), 
-                                       this->GetS3Client())
-  );
+  result->reset(new S3RandomAccessFile(
+                      bucket, object, use_mpd,
+                      this->GetTransferManager(
+                        Aws::Transfer::TransferDirection::DOWNLOAD),
+                      this->GetS3Client()));
   return Status::OK();
 }
 
@@ -555,8 +594,12 @@ Status S3FileSystem::NewWritableFile(const string& fname,
                                      std::unique_ptr<WritableFile>* result) {
   string bucket, object;
   TF_RETURN_IF_ERROR(ParseS3Path(fname, false, &bucket, &object));
-  result->reset(new S3WritableFile(bucket, object, this->GetTransferManager(),
-                                   this->GetS3Client()));
+  result->reset(new S3WritableFile(
+                      bucket, object, 
+                      this->GetTransferManager(
+                        Aws::Transfer::TransferDirection::UPLOAD),
+                      this->GetS3Client()));
+
   return Status::OK();
 }
 
@@ -571,8 +614,11 @@ Status S3FileSystem::NewAppendableFile(const string& fname,
 
   string bucket, object;
   TF_RETURN_IF_ERROR(ParseS3Path(fname, false, &bucket, &object));
-  result->reset(new S3WritableFile(bucket, object, this->GetTransferManager(),
-                                   this->GetS3Client()));
+  result->reset(new S3WritableFile(
+                      bucket, object, 
+                      this->GetTransferManager(
+                        Aws::Transfer::TransferDirection::UPLOAD),
+                      this->GetS3Client()));
 
   while (true) {
     status = reader->Read(offset, kS3ReadAppendableFileBufferSize, &read_chunk,
@@ -953,7 +999,7 @@ Status S3FileSystem::MultiPartCopy(const Aws::String& source,
          it != incompletePartStates.end(); it++) {
       int partNumber = it->first;
       uint64 startPos = (partNumber - 1) * multi_part_chunk_size_;
-      uint64 endPos = startPos + kS3MultiPartChunkSize - 1;
+      uint64 endPos = startPos + kS3MultiPartUploadChunkSize - 1;
       if (endPos >= file_length) {
         endPos = file_length - 1;
       }
