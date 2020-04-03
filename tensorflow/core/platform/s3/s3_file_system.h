@@ -106,6 +106,7 @@ class S3FileSystem : public FileSystem {
 
   // Returns the member transfer manager, initializing as-needed.
   std::shared_ptr<Aws::Transfer::TransferManager> GetTransferManager(const Aws::Transfer::TransferDirection& direction);
+  void InitializeTransferManagers();
   std::map<Aws::Transfer::TransferDirection, std::shared_ptr<Aws::Transfer::TransferManager> >transfer_managers_;
 
   // Returns the member executor for transfer manager, initializing as-needed.
@@ -137,8 +138,7 @@ class S3FileSystem : public FileSystem {
   mutex initialization_lock_;
 
   // size to split objects during multipart upload/download/copy
-  uint64 multi_part_upload_chunk_size_;
-  uint64 multi_part_download_chunk_size_;
+  std::map<Aws::Transfer::TransferDirection, uint64> multi_part_chunk_size_;
 
   bool use_multi_part_download_;
 

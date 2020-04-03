@@ -444,26 +444,25 @@ class S3ReadOnlyMemoryRegion : public ReadOnlyMemoryRegion {
 S3FileSystem::S3FileSystem()
     : s3_client_(nullptr, ShutdownClient),
       initialization_lock_(),
-      transfer_manager_(nullptr, ShutdownTransferManager),
       executor_(nullptr, ShutdownExecutor) {
   
   const char* part_size_str = getenv("S3_MULTI_PART_UPLOAD_CHUNK_SIZE");
-  multi_part_upload_chunk_size_ = kS3MultiPartUploadChunkSize;
+  multi_part_chunk_size_[Aws::Transfer::TransferDirection::UPLOAD] = kS3MultiPartUploadChunkSize;
   if (part_size_str) {
     uint64 part_size_num;
     if (strings::safe_strtou64(part_size_str, &part_size_num)) {
-      multi_part_upload_chunk_size_ = part_size_num;
+      multi_part_chunk_size_[Aws::Transfer::TransferDirection::UPLOAD] = part_size_num;
     }
   }
 
   // Different TensorFlow APIs call the download API with different
   // buffer size. Download performance depends on that size and this chunk size.
   part_size_str = getenv("S3_MULTI_PART_DOWNLOAD_CHUNK_SIZE");
-  multi_part_download_chunk_size_ = kS3MultiPartDownloadChunkSize;
+  multi_part_chunk_size_[Aws::Transfer::TransferDirection::DOWNLOAD] = kS3MultiPartDownloadChunkSize;
   if (part_size_str) {
     uint64 part_size_num;
     if (strings::safe_strtou64(part_size_str, &part_size_num)) {
-      multi_part_download_chunk_size_ = part_size_num;
+      multi_part_chunk_size_[Aws::Transfer::TransferDirection::DOWNLOAD] = part_size_num;
     }
   }
 
@@ -474,8 +473,11 @@ S3FileSystem::S3FileSystem()
      use_multi_part_download_ = false;
    }
   }
-
-  InitializeTransferManagers()
+  
+  this->transfer_managers_.insert(std::pair<Aws::Transfer::TransferDirection, std::shared_ptr<Aws::Transfer::TransferManager> > (Aws::Transfer::TransferDirection::UPLOAD,
+    std::shared_ptr<Aws::Transfer::TransferManager>(nullptr, ShutdownTransferManager)));
+  this->transfer_managers_.insert(std::pair<Aws::Transfer::TransferDirection, std::shared_ptr<Aws::Transfer::TransferManager> > (Aws::Transfer::TransferDirection::DOWNLOAD,
+    std::shared_ptr<Aws::Transfer::TransferManager>(nullptr, ShutdownTransferManager)));
 }
 
 S3FileSystem::~S3FileSystem() {}
@@ -514,49 +516,20 @@ std::shared_ptr<Aws::S3::S3Client> S3FileSystem::GetS3Client() {
   return this->s3_client_;
 }
 
-void S3FileSystem::InitializeTransferManagers() {
-  std::shared_ptr<Aws::S3::S3Client> s3_client = this->GetS3Client();
-  std::lock_guard<mutex> lock(this->initialization_lock_);
-
-  Aws::Transfer::TransferManagerConfiguration uploadConfig(
-      this->GetExecutor().get());
-  uploadConfig.s3Client = s3_client;
-  uploadConfig.bufferSize = this->multi_part_upload_chunk_size_;
-  // must be larger than pool size * multi_part_chunk_size
-  uploadConfig.transferBufferMaxHeapSize =
-      (kExecutorPoolSize + 1) * this->multi_part_upload_chunk_size_;
-  this->transfer_managers_.insert(Aws::Transfer::TransferDirection::UPLOAD, 
-    Aws::Transfer::TransferManager::Create(uploadConfig));
-
-  Aws::Transfer::TransferManagerConfiguration downloadConfig(
-      this->GetExecutor().get());
-  downloadConfig.s3Client = s3_client;
-  downloadConfig.bufferSize = this->multi_part_download_chunk_size_;
-  // must be larger than pool size * multi_part_chunk_size
-  downloadConfig.transferBufferMaxHeapSize =
-      (kExecutorPoolSize + 1) * this->multi_part_download_chunk_size_;
-  this->transfer_managers_.insert(Aws::Transfer::TransferDirection::DOWNLOAD, 
-    Aws::Transfer::TransferManager::Create(downloadConfig));
-  
-}
-
 std::shared_ptr<Aws::Transfer::TransferManager>
 S3FileSystem::GetTransferManager(const Aws::Transfer::TransferDirection& direction) {
   std::shared_ptr<Aws::S3::S3Client> s3_client = this->GetS3Client();
   std::lock_guard<mutex> lock(this->initialization_lock_);
-  
-  std::shared_ptr<Aws::Transfer::TransferManager> transfer_manager = ;
-  if (transfer_manager.get() == nullptr) {
-    Aws::Transfer::TransferManagerConfiguration config(
-        this->GetExecutor().get());
+  if (this->transfer_managers_[direction].get() == nullptr) {
+    Aws::Transfer::TransferManagerConfiguration config(this->GetExecutor().get());
     config.s3Client = s3_client;
-    config.bufferSize = this->multi_part_chunk_size_;
-    // must be larger than pool size * multi_part_chunk_size
+    config.bufferSize = this->multi_part_chunk_size_[direction];
+    // must be larger than pool size * multi part chunk size
     config.transferBufferMaxHeapSize =
-        (kExecutorPoolSize + 1) * this->multi_part_chunk_size_;
-    this->transfer_manager_ = Aws::Transfer::TransferManager::Create(config);
+      (kExecutorPoolSize + 1) * this->multi_part_chunk_size_[direction];
+    this->transfer_managers_[direction] = Aws::Transfer::TransferManager::Create(config);
   }
-  return this->transfer_manager_;
+  return this->transfer_managers_[direction];
 }
 
 std::shared_ptr<Aws::Utils::Threading::PooledThreadExecutor>
@@ -912,10 +885,10 @@ Status S3FileSystem::CopyFile(const Aws::String& source_bucket,
   TF_RETURN_IF_ERROR(
       this->GetFileSize(string(source_full_path.c_str()), &file_length));
   int num_parts;
-  if (file_length <= multi_part_chunk_size_) {
+  if (file_length <= multi_part_chunk_size_[Aws::Transfer::TransferDirection::UPLOAD]) {
     num_parts = 1;
   } else {
-    num_parts = ceil((float)file_length / multi_part_chunk_size_);
+    num_parts = ceil((float)file_length / multi_part_chunk_size_[Aws::Transfer::TransferDirection::UPLOAD]);
   }
 
   if (num_parts == 1) {
@@ -925,7 +898,8 @@ Status S3FileSystem::CopyFile(const Aws::String& source_bucket,
         "MultiPartCopy with number of parts more than 10000 is not supported. "
         "Your object ",
         source, " required ", num_parts,
-        " as multi_part_copy_part_size is set to ", multi_part_chunk_size_,
+        " as multi_part_copy_part_size is set to ", 
+        multi_part_chunk_size_[Aws::Transfer::TransferDirection::UPLOAD],
         ". You can control this part size using the environment variable ",
         "S3_MULTI_PART_COPY_PART_SIZE to increase it.");
     return tensorflow::errors::Unimplemented(message);
@@ -970,7 +944,9 @@ Status S3FileSystem::MultiPartCopy(const Aws::String& source,
 
   Aws::String uploadID = multipartUploadOutcome.GetResult().GetUploadId();
   VLOG(1) << "Copying from " << source << " in " << num_parts
-          << " parts of size " << multi_part_chunk_size_ << " each";
+          << " parts of size "
+          << multi_part_chunk_size_[Aws::Transfer::TransferDirection::UPLOAD]
+          << " each";
   Aws::S3::Model::CompletedMultipartUpload completedMPURequest;
 
   // passed to each callback keyed by partNumber
@@ -998,8 +974,8 @@ Status S3FileSystem::MultiPartCopy(const Aws::String& source,
     for (std::map<int, PartState>::iterator it = incompletePartStates.begin();
          it != incompletePartStates.end(); it++) {
       int partNumber = it->first;
-      uint64 startPos = (partNumber - 1) * multi_part_chunk_size_;
-      uint64 endPos = startPos + kS3MultiPartUploadChunkSize - 1;
+      uint64 startPos = (partNumber - 1) * multi_part_chunk_size_[Aws::Transfer::TransferDirection::UPLOAD];
+      uint64 endPos = startPos + multi_part_chunk_size_[Aws::Transfer::TransferDirection::UPLOAD] - 1;
       if (endPos >= file_length) {
         endPos = file_length - 1;
       }
