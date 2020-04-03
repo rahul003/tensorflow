@@ -474,10 +474,21 @@ S3FileSystem::S3FileSystem()
    }
   }
   
-  this->transfer_managers_.insert(std::pair<Aws::Transfer::TransferDirection, std::shared_ptr<Aws::Transfer::TransferManager> > (Aws::Transfer::TransferDirection::UPLOAD,
-    std::shared_ptr<Aws::Transfer::TransferManager>(nullptr, ShutdownTransferManager)));
-  this->transfer_managers_.insert(std::pair<Aws::Transfer::TransferDirection, std::shared_ptr<Aws::Transfer::TransferManager> > (Aws::Transfer::TransferDirection::DOWNLOAD,
-    std::shared_ptr<Aws::Transfer::TransferManager>(nullptr, ShutdownTransferManager)));
+  auto upload_pair = 
+    std::pair<Aws::Transfer::TransferDirection, 
+              std::shared_ptr<Aws::Transfer::TransferManager> > 
+             (Aws::Transfer::TransferDirection::UPLOAD,
+              std::shared_ptr<Aws::Transfer::TransferManager>
+              (nullptr, ShutdownTransferManager));
+  auto download_pair = 
+    std::pair<Aws::Transfer::TransferDirection, 
+              std::shared_ptr<Aws::Transfer::TransferManager> > 
+             (Aws::Transfer::TransferDirection::DOWNLOAD,
+              std::shared_ptr<Aws::Transfer::TransferManager>
+              (nullptr, ShutdownTransferManager));
+  
+  this->transfer_managers_.insert(upload_pair);
+  this->transfer_managers_.insert(download_pair);
 }
 
 S3FileSystem::~S3FileSystem() {}
