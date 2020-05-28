@@ -25,14 +25,13 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import os
-
 from tensorflow.python.keras import backend
 from tensorflow.python.keras.applications import imagenet_utils
 from tensorflow.python.keras.engine import training
 from tensorflow.python.keras.layers import VersionAwareLayers
 from tensorflow.python.keras.utils import data_utils
 from tensorflow.python.keras.utils import layer_utils
+from tensorflow.python.lib.io import file_io
 from tensorflow.python.util.tf_export import keras_export
 
 
@@ -53,7 +52,7 @@ def InceptionResNetV2(include_top=True,
                       **kwargs):
   """Instantiates the Inception-ResNet v2 architecture.
 
-  Reference paper:
+  Reference:
   - [Inception-v4, Inception-ResNet and the Impact of
      Residual Connections on Learning](https://arxiv.org/abs/1602.07261)
     (AAAI 2017)
@@ -113,7 +112,7 @@ def InceptionResNetV2(include_top=True,
     layers = VersionAwareLayers()
   if kwargs:
     raise ValueError('Unknown argument(s): %s' % (kwargs,))
-  if not (weights in {'imagenet', None} or os.path.exists(weights)):
+  if not (weights in {'imagenet', None} or file_io.file_exists(weights)):
     raise ValueError('The `weights` argument should be either '
                      '`None` (random initialization), `imagenet` '
                      '(pre-training on ImageNet), '

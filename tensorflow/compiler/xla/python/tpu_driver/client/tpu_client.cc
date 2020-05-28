@@ -24,7 +24,7 @@ limitations under the License.
 #include "absl/time/time.h"
 #include "absl/types/span.h"
 #include "tensorflow/compiler/xla/literal.h"
-#include "tensorflow/compiler/xla/python/semaphore.h"
+#include "tensorflow/compiler/xla/pjrt/semaphore.h"
 #include "tensorflow/compiler/xla/python/tpu_driver/tpu_driver.h"
 #include "tensorflow/compiler/xla/service/computation_placer.h"
 #include "tensorflow/compiler/xla/shape_util.h"
@@ -37,7 +37,8 @@ namespace xla {
 
 TpuDevice::TpuDevice(int id, int host_id, const std::array<int, 3>& coords,
                      int core_on_chip)
-    : xla::Device(id, /*local_device_state=*/nullptr, kTpuPlatform, host_id),
+    : xla::Device(id, /*local_device_state=*/nullptr, kTpuPlatform,
+                  /*device_kind=*/"Cloud TPU", host_id),
       coords_(coords),
       core_on_chip_(core_on_chip) {}
 
@@ -566,7 +567,7 @@ PyTpuExecutable::ExecuteResult PyTpuExecutable::ExecuteHelper(
 
   for (const auto& core_args : all_core_arguments) {
     for (const auto* handle : core_args) {
-      for (auto pending_event : handle->DeviceBuffer()->wait_for_use) {
+      for (const auto& pending_event : handle->DeviceBuffer()->wait_for_use) {
         ready_to_execute.push_back(pending_event.get());
       }
     }
@@ -613,7 +614,7 @@ Status WaitForExecuteEvent(tpu_driver::Event* event) {
 }
 
 StatusOr<std::vector<std::unique_ptr<PyTpuBuffer>>> PyTpuExecutable::Execute(
-    absl::Span<PyTpuBuffer* const> argument_handles, bool tuple_arguments) {
+    absl::Span<PyTpuBuffer* const> argument_handles) {
   if (num_replicas() != 1) {
     return InvalidArgument(
         "Attempted to execute computation with %d replicas using Execute().",
@@ -628,7 +629,7 @@ StatusOr<std::vector<std::unique_ptr<PyTpuBuffer>>> PyTpuExecutable::Execute(
   std::vector<PyTpuBuffer*> all_core_arguments;
 
   std::unique_ptr<PyTpuBuffer> tupled_arguments;
-  if (tuple_arguments_ || tuple_arguments) {
+  if (tuple_arguments_) {
     TF_ASSIGN_OR_RETURN(tupled_arguments,
                         PyTpuBuffer::MakeTuple(argument_handles, client_,
                                                local_devices_.front()));
@@ -659,8 +660,7 @@ StatusOr<std::vector<std::unique_ptr<PyTpuBuffer>>> PyTpuExecutable::Execute(
 
 StatusOr<std::vector<std::vector<std::unique_ptr<PyTpuBuffer>>>>
 PyTpuExecutable::ExecuteOnLocalDevices(
-    absl::Span<const std::vector<PyTpuBuffer*>> argument_handles,
-    bool tuple_arguments) {
+    absl::Span<const std::vector<PyTpuBuffer*>> argument_handles) {
   tensorflow::profiler::TraceMe traceme(
       "PyTpuExecutable::ExecuteOnLocalDevices");
 
@@ -680,7 +680,7 @@ PyTpuExecutable::ExecuteOnLocalDevices(
 
   std::vector<std::unique_ptr<PyTpuBuffer>> tupled_arguments;
   std::vector<std::vector<PyTpuBuffer*>> tupled_argument_pointers;
-  if (tuple_arguments_ || tuple_arguments) {
+  if (tuple_arguments_) {
     tupled_arguments.resize(argument_handles.size());
     tupled_argument_pointers.resize(argument_handles.size());
     for (int i = 0; i < num_local_devices; ++i) {
@@ -750,8 +750,7 @@ PyTpuExecutable::ExecuteOnLocalDevices(
     const XlaComputation& computation,
     absl::optional<std::vector<Shape>> argument_layouts,
     const ExecutableBuildOptions* build_options,
-    std::shared_ptr<PyTpuClient> client,
-    absl::optional<DeviceAssignment> device_assignment, bool tuple_arguments) {
+    std::shared_ptr<PyTpuClient> client, bool tuple_arguments) {
   tensorflow::profiler::TraceMe traceme("PyTpuExecutable::Compile");
 
   VLOG(1) << "Compile: "
@@ -763,21 +762,23 @@ PyTpuExecutable::ExecuteOnLocalDevices(
   if (build_options != nullptr) {
     options = *build_options;
   }
+  absl::optional<xla::DeviceAssignment> device_assignment;
 
   // For POD use case, the device_assignment.num_replicas() may be greater than
   // the number of available local devices, where applicable the non-local
   // devices must be filtered out from participating local computation.
-  if (device_assignment) {
-    if (device_assignment->replica_count() != options.num_replicas()) {
+  if (options.has_device_assignment()) {
+    if (options.device_assignment().replica_count() != options.num_replicas()) {
       return InvalidArgument(
           "Mismatched number of replicas for device "
           "assignment and computation (%d vs %d).",
-          device_assignment->replica_count(), options.num_replicas());
-    } else if (device_assignment->computation_count() != 1) {
+          options.device_assignment().replica_count(), options.num_replicas());
+    } else if (options.device_assignment().computation_count() != 1) {
       return Unimplemented(
           "Only 1 computation per replica supported, %d requested.",
-          device_assignment->computation_count());
+          options.device_assignment().computation_count());
     }
+    device_assignment = options.device_assignment();
   } else {
     TF_ASSIGN_OR_RETURN(device_assignment,
                         client->GetDefaultDeviceAssignment(

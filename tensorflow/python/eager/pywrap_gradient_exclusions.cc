@@ -50,7 +50,7 @@ auto OpGradientInfoInit(const T &a) {
 
 absl::optional<tensorflow::gtl::FlatSet<int>> OpGradientUnusedInputIndices(
     const tensorflow::string &op_name) {
-  static std::array<OpIndexInfo, 347> a = {{
+  static std::array<OpIndexInfo, 348> a = {{
       {"Acosh"},
       {"AllToAll", 1, {0}},
       {"ApproximateEqual"},
@@ -396,6 +396,7 @@ absl::optional<tensorflow::gtl::FlatSet<int>> OpGradientUnusedInputIndices(
       {"WholeFileReader"},
       {"XlaClusterOutput"},
       {"XlaSharding"},
+      {"XlaSpmdShardToFullShape"},
       {"ZerosLike"},
       {"VarHandleOp"},
   }};
@@ -410,7 +411,7 @@ absl::optional<tensorflow::gtl::FlatSet<int>> OpGradientUnusedInputIndices(
 
 absl::optional<tensorflow::gtl::FlatSet<int>> OpGradientUnusedOutputIndices(
     const tensorflow::string &op_name) {
-  static std::array<OpIndexInfo, 460> a = {{
+  static std::array<OpIndexInfo, 461> a = {{
       {"Abs"},
       {"AccumulateNV2"},
       {"Acos"},
@@ -833,7 +834,6 @@ absl::optional<tensorflow::gtl::FlatSet<int>> OpGradientUnusedOutputIndices(
       {"TensorListGather"},
       {"TensorListGetItem"},
       {"TensorListLength"},
-      {"TensorListPopBack", 1, {1}},
       {"TensorListPushBack"},
       {"TensorListPushBackBatch"},
       {"TensorListResize"},
@@ -866,6 +866,8 @@ absl::optional<tensorflow::gtl::FlatSet<int>> OpGradientUnusedOutputIndices(
       {"XlaClusterOutput"},
       {"XlaEinsum"},
       {"XlaSharding"},
+      {"XlaSpmdFullToShardShape"},
+      {"XlaSpmdShardToFullShape"},
       {"Xlog1py"},
       {"Xlogy"},
       {"ZerosLike"},

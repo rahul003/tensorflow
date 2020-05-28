@@ -68,6 +68,8 @@ inline TensorType TfLiteTypeToSchemaType(TfLiteType type) {
       return TensorType_FLOAT32;
     case kTfLiteFloat16:
       return TensorType_FLOAT16;
+    case kTfLiteFloat64:
+      return TensorType_FLOAT64;
     case kTfLiteInt32:
       return TensorType_INT32;
     case kTfLiteUInt8:
@@ -216,15 +218,32 @@ PyObject* CalibrationWrapper::SetTensor(int index, PyObject* value) {
     return nullptr;
   }
 
+  std::vector<int> dims(PyArray_NDIM(array));
+  bool has_unknown_dims = false;
   for (int j = 0; j < PyArray_NDIM(array); j++) {
-    if (tensor->dims->data[j] != PyArray_SHAPE(array)[j]) {
+    // Ensure the calibration data input shape is the same as the model input
+    // shape unless the dimension is unknown.
+    if (tensor->dims_signature->size == tensor->dims->size &&
+        tensor->dims_signature->data[j] == -1) {
+      has_unknown_dims = true;
+    } else if (tensor->dims->data[j] != PyArray_SHAPE(array)[j]) {
       PyErr_Format(PyExc_ValueError,
                    "Cannot set tensor: Size mismatch, expected %d for dim "
                    "%d but found %ld",
                    tensor->dims->data[j], j, PyArray_SHAPE(array)[j]);
       return nullptr;
     }
+    dims[j] = PyArray_SHAPE(array)[j];
   }
+
+  // Resize the input tensor if there are unknown dimensions.
+  if (has_unknown_dims) {
+    // Does strict checking on the `ResizeInputTensor` call.
+    TFLITE_PY_CHECK(interpreter_->ResizeInputTensorStrict(index, dims));
+    TFLITE_PY_CHECK(interpreter_->AllocateTensors());
+  }
+
+  tensor = interpreter_->tensor(index);
 
   size_t size = PyArray_NBYTES(array);
   if (size != tensor->bytes) {

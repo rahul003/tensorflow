@@ -80,28 +80,28 @@ cuda_py_test(
 tf_python_pybind_extension(
     name = "_pywrap_traceme",
     srcs = ["traceme_wrapper.cc"],
-    features = ["-layering_check"],
     module_name = "_pywrap_traceme",
     visibility = [
         "//perftools/accelerators/xprof/xprofilez/integration_tests:__pkg__",
         "//tensorflow/python/profiler:__subpackages__",
     ],
     deps = [
-        "//tensorflow/core:lib",
-        "//tensorflow/core/profiler/lib:traceme_headers",
-        "@com_google_absl//absl/types:optional",
+        ":traceme_context_manager",
         "@pybind11",
     ],
 )
 
-tf_python_pybind_extension(
-    name = "_pywrap_scoped_annotation",
-    srcs = ["scoped_annotation_wrapper.cc"],
+cc_library(
+    name = "traceme_context_manager",
+    hdrs = ["traceme_context_manager.h"],
     features = ["-layering_check"],
-    module_name = "_pywrap_scoped_annotation",
+    visibility = [
+        "//tensorflow/compiler/xla/python:__pkg__",
+    ],
     deps = [
         "//tensorflow/core:lib",
-        "//tensorflow/core/profiler/lib:scoped_annotation_headers",
+        "//tensorflow/core/profiler/lib:traceme_headers",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:optional",
         "@pybind11",
     ],
@@ -118,6 +118,7 @@ tf_python_pybind_extension(
     ],
     deps = [
         "//tensorflow/core:lib",
+        "//tensorflow/core/profiler:profiler_service_proto_cc",
         "//tensorflow/core/profiler/convert:xplane_to_profile_response",
         "//tensorflow/core/profiler/convert:xplane_to_trace_events",
         "//tensorflow/core/profiler/lib:profiler_session_headers",
